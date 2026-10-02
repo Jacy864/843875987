@@ -382,8 +382,11 @@ footer{
       </div>
       <div class="expBody">
         <div class="field">
-          <label>所在城市（手填，注入「所在地」；留空不注入）</label>
-          <input id="sCity" placeholder="深圳">
+          <label>所在地區（省 → 市，留空＝自動定位）</label>
+          <div class="grid2">
+            <select id="sProv" onchange="onProvChange()"></select>
+            <select id="sCitySel" onchange="onCityChange()"></select>
+          </div>
         </div>
         <div style="display:flex;gap:18px;flex-wrap:wrap;margin:4px 0 8px">
           <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="sInjTime"> 日期時間（每次發送即時）</label>
@@ -506,7 +509,39 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.7';
+const APP_VER='rpf-v5.8';
+const CITY_DATA={
+'北京市':['北京市'],'天津市':['天津市'],'上海市':['上海市'],'重慶市':['重慶市'],
+'廣東省':['廣州市','韶關市','深圳市','珠海市','汕頭市','佛山市','江門市','湛江市','茂名市','肇慶市','惠州市','梅州市','汕尾市','河源市','陽江市','清遠市','東莞市','中山市','潮州市','揭陽市','雲浮市'],
+'江蘇省':['南京市','無錫市','徐州市','常州市','蘇州市','南通市','連雲港市','淮安市','鹽城市','揚州市','鎮江市','泰州市','宿遷市'],
+'浙江省':['杭州市','寧波市','溫州市','嘉興市','湖州市','紹興市','金華市','衢州市','舟山市','台州市','麗水市'],
+'山東省':['濟南市','青島市','淄博市','棗莊市','東營市','煙台市','濰坊市','濟寧市','泰安市','威海市','日照市','臨沂市','德州市','聊城市','濱州市','菏澤市'],
+'河南省':['鄭州市','開封市','洛陽市','平頂山市','安陽市','鶴壁市','新鄉市','焦作市','濮陽市','許昌市','漯河市','三門峽市','南陽市','商丘市','信陽市','周口市','駐馬店市'],
+'四川省':['成都市','自貢市','攀枝花市','瀘州市','德陽市','綿陽市','廣元市','遂寧市','內江市','樂山市','南充市','眉山市','宜賓市','廣安市','達州市','雅安市','巴中市','資州市'],
+'湖北省':['武漢市','黃石市','十堰市','宜昌市','襄陽市','鄂州市','荊門市','孝感市','荊州市','黃岡市','咸寧市','隨州市'],
+'湖南省':['長沙市','株洲市','湘潭市','衡陽市','邵陽市','岳陽市','常德市','張家界市','益陽市','郴州市','永州市','懷化市','婁底市'],
+'福建省':['福州市','廈门市','莆田市','三明市','泉州市','漳州市','南平市','龍巖市','寧德市'],
+'安徽省':['合肥市','蕪湖市','蚌埠市','淮南市','馬鞍山市','淮北市','銅陵市','安慶市','黃山市','滁州市','阜陽市','宿州市','六安市','亳州市','池州市','宣城市'],
+'河北省':['石家莊市','唐山市','秦皇島市','邯鄲市','邢台市','保定市','張家口市','承德市','滄州市','廊坊市','衡水市'],
+'陝西省':['西安市','銅川市','寶雞市','咸陽市','渭南市','延安市','漢中市','榆林市','安康市','商洛市'],
+'山西省':['太原市','大同市','陽泉市','長治市','晉城市','朔州市','晉中市','運城市','忻州市','臨汾市','呂梁市'],
+'雲南省':['昆明市','曲靖市','玉溪市','保山市','昭通市','麗江市','普洱市','臨滄市'],
+'貴州省':['貴陽市','六盤水市','遵義市','安順市','畢節市','銅仁市'],
+'廣西壯族自治區':['南寧市','柳州市','桂林市','梧州市','北海市','防城港市','欽州市','貴港市','玉林市','百色市','賀州市','河池市','來賓市','崇左市'],
+'海南省':['海口市','三亞市','三沙市','儋州市'],
+'遼寧省':['瀋陽市','大連市','鞍山市','撫順市','本溪市','丹東市','錦州市','營口市','阜新市','遼陽市','盤錦市','鐵嶺市','朝陽市','葫蘆島市'],
+'吉林省':['長春市','吉林市','四平市','遼源市','通化市','白山市','松原市','白城市'],
+'黑龍江省':['哈爾濱市','齊齊哈爾市','雞西市','鶴崗市','雙鴨山市','大慶市','伊春市','佳木斯市','七台河市','牡丹江市','黑河市','綏化市'],
+'內蒙古自治區':['呼和浩特市','包頭市','烏海市','赤峰市','通遼市','鄂爾多斯市','呼倫貝爾市','巴彥淖爾市','烏蘭察布市'],
+'新疆維吾爾自治區':['烏魯木齊市','克拉瑪依市','吐魯番市','哈密市'],
+'甘肅省':['蘭州市','嘉峪關市','金昌市','白銀市','天水市','武威市','張掖市','平涼市','酒泉市','慶陽市','定西市','隴南市'],
+'寧夏回族自治區':['銀川市','石嘴山市','吳忠市','固原市','中衛市'],
+'青海省':['西寧市','海東市'],
+'西藏自治區':['拉薩市','日喀則市','昌都市','林芝市','山南市','那曲市'],
+'香港特別行政區':['香港'],
+'澳門特別行政區':['澳門'],
+'台灣省':['台北市','新北市','桃園市','台中市','台南市','高雄市','基隆市','新竹市','嘉義市']
+};
 const K_SET='rpf.settings', K_PERSONA='rpf.persona', K_SESSIONS='rpf.sessions', K_ACT='rpf.activeSession', K_MEMP='rpf.memPrompt', K_PROJ='rpf.projects';
 const K_SCHAT=id=>'rpf.schat.'+id, K_SMEM=id=>'rpf.smem.'+id;
 function uid(){ return 's_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6) }
@@ -531,7 +566,7 @@ let settings = LS.get(K_SET, {
   key:'', model:'glm-5.2', temp:0.8, maxTok:0, ctx:20,
   userName:'我', sysPrompt:DEFAULT_SYS, regexRules:'', theme:'auto',
   visBase:'', visKey:'', visModel:'glm-4v-flash', softWords:'',
-  injTime:1, injWeather:1, city:''
+  injTime:1, injWeather:1, city:'', prov:''
 });
 if(!settings.theme) settings.theme='auto';
 if(!settings.v4){ if(settings.maxTok==null||settings.maxTok===2048) settings.maxTok=0; settings.v4=1; LS.set(K_SET,settings) }
@@ -797,6 +832,24 @@ function syncCharName(from){
 function updSetSub(){
   $('setSub').textContent=($('sModel').value.trim()||'glm-5.2')+' · '+(FMT_NAMES[$('sFmt').value]||'普通 API');
 }
+function initCitySel(){
+  const pv=$('sProv'), ct=$('sCitySel');
+  pv.innerHTML='<option value="">（自動定位）</option>'+Object.keys(CITY_DATA).map(p=>'<option>'+p+'</option>').join('');
+  onProvChange();
+  const c=settings.city||'';
+  if(c){
+    let hit=null;
+    for(const p in CITY_DATA){ const arr=CITY_DATA[p]; const i=arr.indexOf(c); const j=arr.indexOf(c.replace(/市$/,'')+'市');
+      const idx=i>=0?i:j; if(idx>=0){ hit=[p,arr[idx]]; break } }
+    if(hit){ pv.value=hit[0]; onProvChange(); ct.value=hit[1] }
+    else { const o=document.createElement('option'); o.value=c; o.textContent='自訂：'+c; ct.appendChild(o); ct.value=c }
+  }
+}
+function onProvChange(){
+  const ct=$('sCitySel');
+  ct.innerHTML='<option value="">（自動定位）</option>'+((CITY_DATA[$('sProv').value]||[]).map(c=>'<option>'+c+'</option>').join(''));
+}
+function onCityChange(){}
 function fillDrawer(){
   const p=curPersona();
   const pr=projOf(curSession());
@@ -809,7 +862,7 @@ function fillDrawer(){
   $('sTemp').value=settings.temp; $('sMaxTok').value=settings.maxTok; $('sCtx').value=settings.ctx;
   $('sUserName').value=settings.userName; $('sSysPrompt').value=settings.sysPrompt; $('sRegex').value=settings.regexRules;
   $('sVisModel').value=settings.visModel||''; $('sVisKey').value=settings.visKey||''; $('sVisBase').value=settings.visBase||''; $('sSoftWords').value=settings.softWords||'';
-  $('sInjTime').checked=!!settings.injTime; $('sInjWeather').checked=!!settings.injWeather; $('sCity').value=settings.city||''; updWStat();
+  $('sInjTime').checked=!!settings.injTime; $('sInjWeather').checked=!!settings.injWeather; initCitySel(); updWStat();
   updMemSub(); updSetSub();
   updateBaseHint(); renderSeg(); renderSessionList();
 }
@@ -857,7 +910,7 @@ function readSettingsForm(){
     sysPrompt:$('sSysPrompt').value, regexRules:$('sRegex').value,
     visModel:$('sVisModel').value.trim(), visKey:$('sVisKey').value.trim(), visBase:normalizeBase($('sVisBase').value.trim()),
     softWords:$('sSoftWords').value,
-    injTime:$('sInjTime').checked?1:0, injWeather:$('sInjWeather').checked?1:0, city:$('sCity').value.trim(),
+    injTime:$('sInjTime').checked?1:0, injWeather:$('sInjWeather').checked?1:0, city:$('sCitySel').value, prov:$('sProv').value,
     theme:settings.theme||'auto', v4:1 });
 }
 function saveAll(){
@@ -1086,7 +1139,7 @@ async function refreshWeather(){
 function envLine(){
   let s='';
   if(settings.injTime) s='現在時間：'+nowStr();
-  if(settings.city){ if(s) s+='；'; s+='所在地：'+settings.city }
+  if(settings.city){ if(s) s+='；'; const p=(settings.prov||'').replace(/(省|市|壯族自治區|維吾爾自治區|回族自治區|自治區|特別行政區)$/,''); const c=(settings.city||'').replace(/市$/,''); s+='所在地：'+(p&&p!==c?p+'·':'')+c }
   if(settings.injWeather){
     const w=LS.get('rpf.weather',null);
     if(w&&w.text&&w.d===todayStr()&&(w.city||'')===(settings.city||'').trim()){ if(s) s+='；'; s+='所在地天氣：'+w.text }
