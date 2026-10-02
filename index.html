@@ -311,7 +311,7 @@ footer{
     <hr class="divider">
 
     <div class="secLabel" id="personaLabel">角色人設（此 session 獨立）</div>
-    <div class="field"><label>角色名（{{char}}）</label><input id="cName" placeholder="新角色"></div>
+    <div class="field"><label>角色名（{{char}}）</label><input id="cName" placeholder="新角色" oninput="syncCharName('cName')"></div>
     <div class="field">
       <label>角色設定</label>
       <textarea id="cDesc" style="min-height:110px" placeholder="外貌、性格、背景、與 {{user}} 的關係、說話習慣…"></textarea>
@@ -339,6 +339,10 @@ footer{
       <div class="expBody">
         <div class="secLabel">角色與提示詞</div>
         <div class="field"><label>你的名字（代入 {{user}}）</label><input id="sUserName" placeholder="我"></div>
+        <div class="grid2">
+          <div class="field"><label>角色名稱（本對話 {{char}}）</label><input id="cName2" placeholder="新角色" oninput="syncCharName('cName2')"></div>
+          <div class="field"><label>你給角色的備注（模型知道你私下這樣叫衪）</label><input id="cNick" placeholder="如：月月"></div>
+        </div>
         <div class="field">
           <label>全域 System Prompt（人設強化／寫作指令都放這）</label>
           <textarea id="sSysPrompt" style="min-height:120px"></textarea>
@@ -500,7 +504,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.2';
+const APP_VER='rpf-v5.3';
 const K_SET='rpf.settings', K_PERSONA='rpf.persona', K_SESSIONS='rpf.sessions', K_ACT='rpf.activeSession', K_MEMP='rpf.memPrompt', K_PROJ='rpf.projects';
 const K_SCHAT=id=>'rpf.schat.'+id, K_SMEM=id=>'rpf.smem.'+id;
 function uid(){ return 's_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6) }
@@ -534,7 +538,7 @@ let projects = LS.get(K_PROJ, []);
 let activeId = LS.get(K_ACT, null);
 
 function newSession(){ return { id:uid(), title:'新角色', createdAt:Date.now(), lastAt:Date.now(),
-  persona:{ name:'新角色', desc:'', first:'' } } }
+  persona:{ name:'新角色', nick:'', desc:'', first:'' } } }
 function curSession(){ return sessions.find(s=>s.id===activeId) }
 function projOf(s){ return (s&&s.projectId)?projects.find(p=>p.id===s.projectId):null }
 function curPersona(){
@@ -725,7 +729,7 @@ function projDel(id){
   sessions.forEach(s=>{
     if(s.projectId===id){
       s.projectId=null;
-      s.persona={name:p.persona.name,desc:p.persona.desc,first:p.persona.first};
+      s.persona={name:p.persona.name,nick:p.persona.nick||'',desc:p.persona.desc,first:p.persona.first};
       LS.set(K_SMEM(s.id),p.mem||'');
     }
   });
@@ -744,7 +748,7 @@ function assignToProject(sid){
   const ownMem=LS.get(K_SMEM(sid),'');
   if(ownMem) p.mem=p.mem? p.mem+'\n\n—— 併入「'+(s.title||'對話')+'」的記憶 ——\n'+ownMem : ownMem;
   if((!p.persona.name||p.persona.name==='新角色')&&s.persona&&s.persona.name&&s.persona.name!=='新角色'){
-    p.persona={name:s.persona.name,desc:s.persona.desc||'',first:s.persona.first||''};
+    p.persona={name:s.persona.name,nick:s.persona.nick||'',desc:s.persona.desc||'',first:s.persona.first||''};
   }
   s.projectId=p.id; p.lastAt=Date.now();
   localStorage.removeItem(K_SMEM(sid));
@@ -756,7 +760,7 @@ function assignToProject(sid){
 function unassignFromProject(sid){
   const s=sessions.find(x=>x.id===sid); const p=projOf(s); if(!s||!p) return;
   if(!confirm('脫離項目「'+p.name+'」？將帶走一份人設與記憶副本，之後各改各的')) return;
-  s.persona={name:p.persona.name,desc:p.persona.desc,first:p.persona.first};
+  s.persona={name:p.persona.name,nick:p.persona.nick||'',desc:p.persona.desc,first:p.persona.first};
   LS.set(K_SMEM(sid),p.mem||''); s.projectId=null;
   LS.set(K_SESSIONS,sessions);
   renderSessionList(); if(sid===activeId){ renderHeader(); fillDrawer() }
@@ -782,7 +786,11 @@ const FMT_NAMES={openai:'普通 API',coding:'Coding Plan',anthropic:'Coding Plan
 function memLineCount(){ const t=memOf(activeId)||''; const l=t.split('\n').map(x=>x.trim()).filter(Boolean); return l.length }
 function updMemSub(){
   const l=($('mText').value||'').split('\n').map(x=>x.trim()).filter(Boolean).length;
-  $('memSub').textContent='已存 '+l+' 條 · 自動注入對話';
+  $('memSub').textContent='已存 '+l+' 條';
+}
+function syncCharName(from){
+  const v=$(from).value;
+  $('cName').value=v; $('cName2').value=v;
 }
 function updSetSub(){
   $('setSub').textContent=($('sModel').value.trim()||'glm-5.2')+' · '+(FMT_NAMES[$('sFmt').value]||'普通 API');
@@ -792,7 +800,7 @@ function fillDrawer(){
   const pr=projOf(curSession());
   $('personaLabel').textContent=pr? '角色人設（項目「'+pr.name+'」共享）' : '角色人設（此 session 獨立）';
   $('memLabel').textContent=pr? '記憶內容（每次對話自動注入 system，項目「'+pr.name+'」共享）' : '記憶內容（每次對話自動注入 system，僅此對話）';
-  $('cName').value=p.name||''; $('cDesc').value=p.desc||''; $('cFirst').value=p.first||'';
+  $('cName').value=p.name||''; $('cName2').value=p.name||''; $('cNick').value=p.nick||''; $('cDesc').value=p.desc||''; $('cFirst').value=p.first||'';
   $('mText').value=memOf(activeId); $('mPrompt').value=LS.get(K_MEMP,DEFAULT_MEM_PROMPT);
   $('sFmt').value=settings.fmt||'openai';
   $('sBaseUrl').value=settings.baseUrl; $('sKey').value=settings.key; $('sModel').value=settings.model;
@@ -853,12 +861,13 @@ function readSettingsForm(){
 function saveAll(){
   const s=curSession(); if(!s) return;
   const name=$('cName').value.trim()||'新角色';
-  const persona={ name, desc:$('cDesc').value, first:$('cFirst').value };
+  const oldName=(s.persona&&s.persona.name)||'';
+  const persona={ name, nick:$('cNick').value.trim(), desc:$('cDesc').value, first:$('cFirst').value };
   const pr=projOf(s);
   if(pr){ pr.persona=persona; pr.lastAt=Date.now(); LS.set(K_PROJ,projects) }
   else{
     s.persona=persona;
-    if(!s.title||s.title==='新角色'||s.title==='新對話') s.title=name;
+    if(!s.title||s.title==='新角色'||s.title==='新對話'||s.title===oldName) s.title=name;
   }
   setMem(activeId,$('mText').value);
   LS.set(K_MEMP,$('mPrompt').value||DEFAULT_MEM_PROMPT);
@@ -875,7 +884,7 @@ function importCharCard(){
       let j=JSON.parse(r.result);
       if(j.spec==='chara_card_v2'||j.spec==='chara_card_v3') j=j.data;
       if(j.spec_version&&j.data) j=j.data;
-      $('cName').value=j.name||'導入角色';
+      $('cName').value=j.name||'導入角色'; $('cName2').value=$('cName').value;
       $('cDesc').value=[j.description, j.personality?('性格：'+j.personality):'', j.scenario?('場景：'+j.scenario):'']
         .filter(Boolean).join('\n');
       $('cFirst').value=j.first_mes||'';
@@ -1080,7 +1089,9 @@ function buildMessages(splitSystem,enLastUser){
   const p=curPersona();
   const mem=memOf(activeId);
   const ph=s=>s.replace(/\{\{char\}\}/g,p.name).replace(/\{\{user\}\}/g,settings.userName||'我');
-  const sys=[envLine(), settings.sysPrompt, '# 角色設定\n'+p.desc, mem?('# 長期記憶\n'+mem):'']
+  const sys=[envLine(), settings.sysPrompt,
+    p.nick?('（{{user}} 私底下稱呼 {{char}} 為「'+p.nick+'」；聽到這個稱呼就是在叫你，自然回應即可）'):'',
+    '# 角色設定\n'+p.desc, mem?('# 長期記憶\n'+mem):'']
     .filter(x=>x&&x.trim()).map(ph).join('\n\n');
   const h=chat();
   const trimmed=(settings.ctx>0&&h.length>settings.ctx)?h.slice(h.length-settings.ctx):h.slice();
@@ -1518,7 +1529,7 @@ if(settings.injTime==null){ settings.injTime=1; settings.injWeather=1; LS.set(K_
     }
     if(j.ver>=3&&Array.isArray(j.sessions)){
       sessions=j.sessions;
-      sessions.forEach(s=>{ if(!s.persona) s.persona={name:s.title||'新角色',desc:'',first:''} });
+      sessions.forEach(s=>{ if(!s.persona) s.persona={name:s.title||'新角色',nick:'',desc:'',first:''} });
       activeId=(j.activeSession&&sessions.find(s=>s.id===j.activeSession))?j.activeSession:sessions[0].id;
     }else if(j.ver===2&&Array.isArray(j.sessions)){
       const gp=j.persona||{name:'新角色',desc:'',first:''};
