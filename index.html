@@ -506,7 +506,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.6';
+const APP_VER='rpf-v5.7';
 const K_SET='rpf.settings', K_PERSONA='rpf.persona', K_SESSIONS='rpf.sessions', K_ACT='rpf.activeSession', K_MEMP='rpf.memPrompt', K_PROJ='rpf.projects';
 const K_SCHAT=id=>'rpf.schat.'+id, K_SMEM=id=>'rpf.smem.'+id;
 function uid(){ return 's_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6) }
@@ -1055,16 +1055,22 @@ async function refreshWeather(){
   try{
     let lat,lon,geo='';
     if(city){
-      let hit=null;
-      for(let i=0;i<2&&!hit;i++){
-        if(i) await new Promise(r=>setTimeout(r,800));
-        const g=await fetch('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(city)+'&count=5&language=zh').then(r=>r.json());
-        const rs=(g&&g.results)||[];
-        if(rs.length) hit=rs.sort((a,b)=>(b.population||0)-(a.population||0))[0];
-      }
+      const isCity=x=>/^PPL(A|C)/.test(x.feature_code||'')||(x.population||0)>=100000;
+      const geoQuery=async q=>{
+        for(let i=0;i<2;i++){
+          if(i) await new Promise(r=>setTimeout(r,800));
+          const g=await fetch('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(q)+'&count=5&language=zh').then(r=>r.json());
+          const rs=(g&&g.results)||[];
+          if(rs.length){ const score=x=>(/^PPL(A|C)/.test(x.feature_code||'')?5e7:0)+(x.population||0);
+            return rs.slice().sort((a,b)=>score(b)-score(a))[0] }
+        }
+        return null;
+      };
+      let hit=await geoQuery(city);
+      if(!hit||!isCity(hit)) hit=(await geoQuery(city+'市'))||hit;
       if(!hit){ setEnvErr('cityNF'); return null }
       lat=hit.latitude; lon=hit.longitude;
-      geo=hit.name+(hit.admin1?'·'+hit.admin1:'');
+      geo=/^PPL(A|C)/.test(hit.feature_code||'')?hit.name:(hit.name+(hit.admin1?'（'+hit.admin1+'）':''));
     }else{
       const pos=await getPos();
       if(!pos) return null;
