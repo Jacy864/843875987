@@ -485,6 +485,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
+const APP_VER='rpf-v5.1';
 const K_SET='rpf.settings', K_PERSONA='rpf.persona', K_SESSIONS='rpf.sessions', K_ACT='rpf.activeSession', K_MEMP='rpf.memPrompt', K_PROJ='rpf.projects';
 const K_SCHAT=id=>'rpf.schat.'+id, K_SMEM=id=>'rpf.smem.'+id;
 function uid(){ return 's_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6) }
@@ -1047,7 +1048,7 @@ function refreshWeatherNow(){
 function updWStat(){
   const el=$('wStat'); if(!el) return;
   const w=LS.get('rpf.weather',null);
-  if(w&&w.text){ el.textContent='目前快取：'+w.text+'（'+w.d+'）'; return }
+  if(w&&w.text){ el.textContent='目前快取：'+w.text+'（'+w.d+'）｜'+APP_VER; return }
   const e=LS.get('rpf.envErr','');
   const M={
     denied:'定位權限被拒——要到「瀏覽器的網站權限設定」允許此站存取位置（Android Chrome: ⋮ → 網站設定 → 位置；iOS: 系統設定 → 該App → 定位），改完回來點「立即刷新」',
@@ -1056,7 +1057,7 @@ function updWStat(){
     nogeo:'此環境不支援定位',
     nonhttps:'本地 file:// 無法定位（正常），線上版自動啟用'
   };
-  el.textContent='狀態：'+(e?(M[e]||(e.indexOf('wx:')===0?'天氣API失敗（'+e.slice(3)+'），自動重試':e)):'等待定位…');
+  el.textContent='狀態：'+(e?(M[e]||(e.indexOf('wx:')===0?'天氣API失敗（'+e.slice(3)+'），自動重試':e)):'等待定位…')+'｜'+APP_VER;
 }
 
 function buildMessages(splitSystem,enLastUser){
@@ -1544,7 +1545,13 @@ function panicWipe(){
 
   migrate(); applyTheme(); renderHeader(); renderChat(); fillDrawer(); refreshWeather();
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
-  navigator.serviceWorker.register('sw.js').catch(function(){});
+  let swReloaded=false;
+  navigator.serviceWorker.register('sw.js').then(function(reg){
+    reg.update().catch(function(){});
+    navigator.serviceWorker.addEventListener('controllerchange',function(){
+      if(!swReloaded){ swReloaded=true; location.reload() }
+    });
+  }).catch(function(){});
 }
 
 </script>
