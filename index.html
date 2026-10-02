@@ -392,6 +392,15 @@ footer{
           <label>輸出清洗正則（每行：規則###替換為）</label>
           <textarea id="sRegex" style="min-height:60px" placeholder="(作為|作為一個)(AI|人工智能)[^\n]*###"></textarea>
         </div>
+        <div class="field">
+          <label>環境感知（注入 system 最前面，讓角色知道現在幾點、今天天氣）</label>
+          <div style="display:flex;gap:18px;flex-wrap:wrap;margin:4px 0">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="sInjTime"> 日期時間（每次發送即時）</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="sInjWeather"> 天氣（每日自動刷新）</label>
+          </div>
+          <div class="hint" id="wStat">無快取</div>
+          <div class="hint">天氣用定位查詢（Open-Meteo 免費、無需 Key），定位只取城市級精度、不進對話上下文；本地 file:// 打開拿不到定位時自動跳過，HTTPS／PWA 下正常。 <span class="act" onclick="refreshWeatherNow()">立即刷新</span></div>
+        </div>
         <hr class="divider">
         <div class="field">
           <label>視覺模型（圖片描述用，不用留空）</label>
@@ -499,7 +508,8 @@ let settings = LS.get(K_SET, {
   baseUrl:'https://open.bigmodel.cn/api/paas/v4',
   key:'', model:'glm-5.2', temp:0.8, maxTok:0, ctx:20,
   userName:'我', sysPrompt:DEFAULT_SYS, regexRules:'', theme:'auto',
-  visBase:'', visKey:'', visModel:'glm-4v-flash', softWords:''
+  visBase:'', visKey:'', visModel:'glm-4v-flash', softWords:'',
+  injTime:1, injWeather:1
 });
 if(!settings.theme) settings.theme='auto';
 if(!settings.v4){ if(settings.maxTok==null||settings.maxTok===2048) settings.maxTok=0; settings.v4=1; LS.set(K_SET,settings) }
@@ -773,6 +783,7 @@ function fillDrawer(){
   $('sTemp').value=settings.temp; $('sMaxTok').value=settings.maxTok; $('sCtx').value=settings.ctx;
   $('sUserName').value=settings.userName; $('sSysPrompt').value=settings.sysPrompt; $('sRegex').value=settings.regexRules;
   $('sVisModel').value=settings.visModel||''; $('sVisKey').value=settings.visKey||''; $('sVisBase').value=settings.visBase||''; $('sSoftWords').value=settings.softWords||'';
+  $('sInjTime').checked=!!settings.injTime; $('sInjWeather').checked=!!settings.injWeather; updWStat();
   updMemSub(); updSetSub();
   updateBaseHint(); renderSeg(); renderSessionList();
 }
@@ -820,6 +831,7 @@ function readSettingsForm(){
     sysPrompt:$('sSysPrompt').value, regexRules:$('sRegex').value,
     visModel:$('sVisModel').value.trim(), visKey:$('sVisKey').value.trim(), visBase:normalizeBase($('sVisBase').value.trim()),
     softWords:$('sSoftWords').value,
+    injTime:$('sInjTime').checked?1:0, injWeather:$('sInjWeather').checked?1:0,
     theme:settings.theme||'auto', v4:1 });
 }
 function saveAll(){
@@ -984,11 +996,60 @@ function clearChat(){
   saveChat([]); renderChat(); renderHeader(); toast('已重開對話');
 }
 
+/* ---------- 環境感知：時間＋天氣注入 ---------- */
+const WMO_CN={0:'晴',1:'大致晴朗',2:'局部多雲',3:'陰',45:'霧',48:'霧凇',51:'毛毛雨',53:'毛毛雨',55:'毛毛雨',56:'凍毛毛雨',57:'凍毛毛雨',61:'小雨',63:'中雨',65:'大雨',66:'凍雨',67:'凍雨',71:'小雪',73:'中雪',75:'大雪',77:'雪粒',80:'小陣雨',81:'陣雨',82:'強陣雨',85:'小陣雪',86:'陣雪',95:'雷雨',96:'雷雨伴冰雹',99:'雷雨伴冰雹'};
+const WD_CN=['日','一','二','三','四','五','六'];
+function pad2(n){ return String(n).padStart(2,'0') }
+function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()) }
+function nowStr(){ const d=new Date(); return todayStr()+'（週'+WD_CN[d.getDay()]+'）'+pad2(d.getHours())+':'+pad2(d.getMinutes()) }
+function getPos(){ return new Promise(res=>{
+  const c=LS.get('rpf.loc',null);
+  if(c&&c.d===todayStr()) return res(c);
+  if(!navigator.geolocation) return res(c&&c.lat!=null?c:null);
+  navigator.geolocation.getCurrentPosition(p=>{
+    const nc={lat:+p.coords.latitude.toFixed(3),lon:+p.coords.longitude.toFixed(3),d:todayStr()};
+    LS.set('rpf.loc',nc); res(nc);
+  },()=>{ res(c&&c.lat!=null?c:null) }, {timeout:9000, maximumAge:3600000});
+})}
+async function refreshWeather(){
+  if(!settings.injWeather) return null;
+  const w=LS.get('rpf.weather',null);
+  if(w&&w.d===todayStr()) return w;
+  try{
+    const pos=await getPos();
+    if(!pos) return (w&&w.text)?w:null;
+    const u='https://api.open-meteo.com/v1/forecast?latitude='+pos.lat+'&longitude='+pos.lon+'&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code&timezone=auto';
+    const r=await fetch(u); const j=await r.json();
+    const c=j&&j.current; if(!c) throw new Error('no data');
+    const nw={d:todayStr(),text:(WMO_CN[c.weather_code]||'未知')+' '+Math.round(c.temperature_2m)+'°C（體感 '+Math.round(c.apparent_temperature)+'°C），濕度 '+c.relative_humidity_2m+'%'};
+    LS.set('rpf.weather',nw); updWStat(); return nw;
+  }catch(e){ return (w&&w.text)?w:null }
+}
+function envLine(){
+  let s='';
+  if(settings.injTime) s='現在時間：'+nowStr();
+  if(settings.injWeather){
+    const w=LS.get('rpf.weather',null);
+    if(w&&w.text){ if(s) s+='；'; s+='所在地天氣：'+w.text }
+    refreshWeather();
+  }
+  return s?('[環境] '+s):'';
+}
+function refreshWeatherNow(){
+  LS.set('rpf.weather',{d:'x',text:''});
+  refreshWeather().then(w=>toast(w&&w.text?'天氣已刷新':'天氣獲取失敗（稍後自動重試）'));
+}
+function updWStat(){
+  const el=$('wStat'); if(!el) return;
+  const w=LS.get('rpf.weather',null);
+  el.textContent='目前快取：'+((w&&w.text)?(w.text+'（'+w.d+'）'):'無');
+}
+
 function buildMessages(splitSystem,enLastUser){
   const p=curPersona();
   const mem=memOf(activeId);
   const ph=s=>s.replace(/\{\{char\}\}/g,p.name).replace(/\{\{user\}\}/g,settings.userName||'我');
-  const sys=[settings.sysPrompt, '# 角色設定\n'+p.desc, mem?('# 長期記憶\n'+mem):'']
+  const sys=[envLine(), settings.sysPrompt, '# 角色設定\n'+p.desc, mem?('# 長期記憶\n'+mem):'']
     .filter(x=>x&&x.trim()).map(ph).join('\n\n');
   const h=chat();
   const trimmed=(settings.ctx>0&&h.length>settings.ctx)?h.slice(h.length-settings.ctx):h.slice();
@@ -1415,7 +1476,8 @@ function importAll(ev){
     const j=JSON.parse(r.result);
     if(j.app!=='rp-shell') throw new Error('不是本應用的備份檔');
     settings=Object.assign({}, settings, j.settings||{});
-    if(!settings.theme) settings.theme='auto';
+if(!settings.theme) settings.theme='auto';
+if(settings.injTime==null){ settings.injTime=1; settings.injWeather=1; LS.set(K_SET,settings) }
     if(j.ver>=4&&Array.isArray(j.projects)){
       projects=j.projects.map(p=>({ id:p.id, name:p.name||'項目',
         persona:p.persona||{name:p.name||'新角色',desc:'',first:''},
@@ -1466,7 +1528,7 @@ function panicWipe(){
   location.reload();
 }
 
-migrate(); applyTheme(); renderHeader(); renderChat(); fillDrawer();
+  migrate(); applyTheme(); renderHeader(); renderChat(); fillDrawer(); refreshWeather();
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   navigator.serviceWorker.register('sw.js').catch(function(){});
 }
