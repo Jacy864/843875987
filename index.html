@@ -504,7 +504,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.3';
+const APP_VER='rpf-v5.4';
 const K_SET='rpf.settings', K_PERSONA='rpf.persona', K_SESSIONS='rpf.sessions', K_ACT='rpf.activeSession', K_MEMP='rpf.memPrompt', K_PROJ='rpf.projects';
 const K_SCHAT=id=>'rpf.schat.'+id, K_SMEM=id=>'rpf.smem.'+id;
 function uid(){ return 's_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6) }
@@ -871,7 +871,11 @@ function saveAll(){
   }
   setMem(activeId,$('mText').value);
   LS.set(K_MEMP,$('mPrompt').value||DEFAULT_MEM_PROMPT);
+  const prevCity=(settings.city||'').trim();
   readSettingsForm();
+  if((settings.city||'').trim()!==prevCity){
+    refreshWeather().then(w=>{ if(w&&w.text) toast('天氣已切換：'+(settings.city||'定位')+' '+w.text.split('，')[0]) });
+  }
   LS.set(K_SET,settings); LS.set(K_SESSIONS,sessions);
   fillDrawer(); renderHeader();
   toast('已保存');
@@ -1043,15 +1047,25 @@ function getPos(){ return new Promise(res=>{
 })}
 async function refreshWeather(){
   if(!settings.injWeather) return null;
+  const city=(settings.city||'').trim();
   const w=LS.get('rpf.weather',null);
-  if(w&&w.d===todayStr()) return w;
+  if(w&&w.d===todayStr()&&(w.city||'')===city) return w;
   try{
-    const pos=await getPos();
-    if(!pos) return (w&&w.text)?w:null;
-    const u='https://api.open-meteo.com/v1/forecast?latitude='+pos.lat+'&longitude='+pos.lon+'&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code&timezone=auto';
+    let lat,lon;
+    if(city){
+      const g=await fetch('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(city)+'&count=1&language=zh').then(r=>r.json());
+      const hit=g&&g.results&&g.results[0];
+      if(!hit){ setEnvErr('cityNF'); return null }
+      lat=hit.latitude; lon=hit.longitude;
+    }else{
+      const pos=await getPos();
+      if(!pos) return null;
+      lat=pos.lat; lon=pos.lon;
+    }
+    const u='https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon+'&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code&timezone=auto';
     const r=await fetch(u); const j=await r.json();
     const c=j&&j.current; if(!c) throw new Error('no data');
-    const nw={d:todayStr(),text:(WMO_CN[c.weather_code]||'未知')+' '+Math.round(c.temperature_2m)+'°C（體感 '+Math.round(c.apparent_temperature)+'°C），濕度 '+c.relative_humidity_2m+'%'};
+    const nw={d:todayStr(),city,text:(WMO_CN[c.weather_code]||'未知')+' '+Math.round(c.temperature_2m)+'°C（體感 '+Math.round(c.apparent_temperature)+'°C），濕度 '+c.relative_humidity_2m+'%'};
     LS.set('rpf.weather',nw); setEnvErr(''); updWStat(); return nw;
   }catch(e){ if(!(w&&w.text)) setEnvErr('wx:'+((e&&e.message)||e)); return (w&&w.text)?w:null }
 }
@@ -1061,7 +1075,7 @@ function envLine(){
   if(settings.city){ if(s) s+='；'; s+='所在地：'+settings.city }
   if(settings.injWeather){
     const w=LS.get('rpf.weather',null);
-    if(w&&w.text){ if(s) s+='；'; s+='所在地天氣：'+w.text }
+    if(w&&w.text&&w.d===todayStr()&&(w.city||'')===(settings.city||'').trim()){ if(s) s+='；'; s+='所在地天氣：'+w.text }
     refreshWeather();
   }
   return s?('[環境] '+s):'';
@@ -1073,16 +1087,18 @@ function refreshWeatherNow(){
 function updWStat(){
   const el=$('wStat'); if(!el) return;
   const w=LS.get('rpf.weather',null);
-  if(w&&w.text){ el.textContent='目前快取：'+w.text+'（'+w.d+'）｜'+APP_VER; return }
+  if(w&&w.text&&w.d===todayStr()&&(w.city||'')===(settings.city||'').trim()){
+    el.textContent='目前快取'+(w.city?'（'+w.city+'）':'')+'：'+w.text+'｜'+APP_VER; return }
   const e=LS.get('rpf.envErr','');
   const M={
     denied:'定位權限被拒——要到「瀏覽器的網站權限設定」允許此站存取位置（Android Chrome: ⋮ → 網站設定 → 位置；iOS: 系統設定 → 該App → 定位），改完回來點「立即刷新」',
     locTimeout:'定位逾時，發送訊息時自動重試',
     unavailable:'定位暫時不可用（檢查手機系統定位開關），自動重試',
     nogeo:'此環境不支援定位',
-    nonhttps:'本地 file:// 無法定位（正常），線上版自動啟用'
+    nonhttps:'本地 file:// 無法定位（正常），線上版自動啟用',
+    cityNF:'找不到該城市（檢查拼寫，可用中文或拼音），暫不注入天氣'
   };
-  el.textContent='狀態：'+(e?(M[e]||(e.indexOf('wx:')===0?'天氣API失敗（'+e.slice(3)+'），自動重試':e)):'等待定位…')+'｜'+APP_VER;
+  el.textContent='狀態：'+(e?(M[e]||(e.indexOf('wx:')===0?'���氣API失敗（'+e.slice(3)+'），自動重試':e)):'等待定位…')+'｜'+APP_VER;
 }
 
 function buildMessages(splitSystem,enLastUser){
