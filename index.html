@@ -331,12 +331,21 @@ footer{
       </div>
     </div>
 
-    <div class="expRow" id="rowMem">
-      <div class="expHead" onclick="toggleExp('rowMem')">
-        <div><div class="et">長期記憶</div><div class="es" id="memSub">已存 0 條 · 自動注入對話</div></div>
+    <div class="expRow" id="rowPlay">
+      <div class="expHead" onclick="toggleExp('rowPlay')">
+        <div><div class="et">角色扮演</div><div class="es">提示詞 · 記憶 · 詞表</div></div>
         <span class="chev">›</span>
       </div>
       <div class="expBody">
+        <div class="secLabel">角色與提示詞</div>
+        <div class="field"><label>你的名字（代入 {{user}}）</label><input id="sUserName" placeholder="我"></div>
+        <div class="field">
+          <label>全域 System Prompt（人設強化／寫作指令都放這）</label>
+          <textarea id="sSysPrompt" style="min-height:120px"></textarea>
+          <div class="hint">注入在所有對話最前面；{{char}} {{user}} 自動替換</div>
+        </div>
+        <hr class="divider">
+        <div class="secLabel">長期記憶 · <span id="memSub">已存 0 條</span></div>
         <div class="field">
           <label id="memLabel">記憶內容（每次對話自動注入 system，僅此對話）</label>
           <textarea id="mText" style="min-height:130px" oninput="updMemSub()" placeholder="關鍵事件、關係進度、用戶偏好、承諾…"></textarea>
@@ -346,6 +355,36 @@ footer{
           <label>摘要指令（可改）</label>
           <textarea id="mPrompt" style="min-height:80px"></textarea>
         </div>
+        <hr class="divider">
+        <div class="secLabel">內容處理</div>
+        <div class="field">
+          <label>敏感詞軟化（每行：原詞=>替換詞；發送到 API 時替換，本地顯示保持原文）</label>
+          <textarea id="sSoftWords" style="min-height:70px" placeholder="領導人姓名=>通稱&#10;具體事件詞=>日常說法"></textarea>
+          <div class="hint">已內建約 60 條成人/粗口/暴力詞自動軟化（簡繁，發送時替換、顯示時自動還原常見項）；此欄只放你的補充規則，政治類人名等請自行添加</div>
+        </div>
+        <div class="field">
+          <label>輸出清洗正則（每行：規則###替換為）</label>
+          <textarea id="sRegex" style="min-height:60px" placeholder="(作為|作為一個)(AI|人工智能)[^\n]*###"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="expRow" id="rowEnv">
+      <div class="expHead" onclick="toggleExp('rowEnv')">
+        <div><div class="et">環境感知</div><div class="es">時間 · 天氣 · 所在地</div></div>
+        <span class="chev">›</span>
+      </div>
+      <div class="expBody">
+        <div class="field">
+          <label>所在城市（手填，注入「所在地」；留空不注入）</label>
+          <input id="sCity" placeholder="深圳">
+        </div>
+        <div style="display:flex;gap:18px;flex-wrap:wrap;margin:4px 0 8px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="sInjTime"> 日期時間（每次發送即時）</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="sInjWeather"> 天氣（每日自動刷新）</label>
+        </div>
+        <div class="hint" id="wStat">無快取</div>
+        <div class="hint">天氣用定位查詢（Open-Meteo 免費、無需 Key），定位只取城市級精度、不進對話上下文；本地 file:// 打開拿不到定位時自動跳過，HTTPS／PWA 下正常。 <span class="act" onclick="refreshWeatherNow()">立即刷新</span></div>
       </div>
     </div>
 
@@ -382,25 +421,6 @@ footer{
           <input id="sCtx" type="number" min="0" step="2">
           <div class="hint">建議 12~40；0＝不限（每次帶全部歷史）。太長易觸發攔截；長期劇情靠「記憶」摘要注入</div>
         </div>
-        <div class="field"><label>你的名字（代入 {{user}}）</label><input id="sUserName" placeholder="我"></div>
-        <div class="field">
-          <label>全域 System Prompt（人設強化／寫作指令都放這）</label>
-          <textarea id="sSysPrompt" style="min-height:120px"></textarea>
-          <div class="hint">注入在所有對話最前面；{{char}} {{user}} 自動替換</div>
-        </div>
-        <div class="field">
-          <label>輸出清洗正則（每行：規則###替換為）</label>
-          <textarea id="sRegex" style="min-height:60px" placeholder="(作為|作為一個)(AI|人工智能)[^\n]*###"></textarea>
-        </div>
-        <div class="field">
-          <label>環境感知（注入 system 最前面，讓角色知道現在幾點、今天天氣）</label>
-          <div style="display:flex;gap:18px;flex-wrap:wrap;margin:4px 0">
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="sInjTime"> 日期時間（每次發送即時）</label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="sInjWeather"> 天氣（每日自動刷新）</label>
-          </div>
-          <div class="hint" id="wStat">無快取</div>
-          <div class="hint">天氣用定位查詢（Open-Meteo 免費、無需 Key），定位只取城市級精度、不進對話上下文；本地 file:// 打開拿不到定位時自動跳過，HTTPS／PWA 下正常。 <span class="act" onclick="refreshWeatherNow()">立即刷新</span></div>
-        </div>
         <hr class="divider">
         <div class="field">
           <label>視覺模型（圖片描述用，不用留空）</label>
@@ -410,13 +430,8 @@ footer{
           </div>
           <label style="margin-top:6px">Base URL（空＝自動：主端點是 Coding 時換 bigmodel 普通端點，否則同主端點）</label>
           <input id="sVisBase" placeholder="自動">
-          <div class="hint">Coding 端點只收文字模型，視覺走普通端點；glm-4v-flash 免費/極便宜，與聊天額度分開計</div>
-        </div>
-        <div class="field">
-          <label>敏感詞軟化（每行：原詞=>替換詞；發送到 API 時替換，本地顯示保持原文）</label>
-          <textarea id="sSoftWords" style="min-height:70px" placeholder="領導人姓名=>通稱&#10;具體事件詞=>日常說法"></textarea>
-          <div class="hint">已內建約 60 條成人/粗口/暴力詞自動軟化（簡繁，發送時替換、顯示時自動還原常見項）；此欄只放你的補充規則，政治類人名等請自行添加</div>
-        </div>
+           <div class="hint">Coding 端點只收文字模型，視覺走普通端點；glm-4v-flash 免費/極便宜，與聊天額度分開計</div>
+         </div>
       </div>
     </div>
 
@@ -485,7 +500,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.1';
+const APP_VER='rpf-v5.2';
 const K_SET='rpf.settings', K_PERSONA='rpf.persona', K_SESSIONS='rpf.sessions', K_ACT='rpf.activeSession', K_MEMP='rpf.memPrompt', K_PROJ='rpf.projects';
 const K_SCHAT=id=>'rpf.schat.'+id, K_SMEM=id=>'rpf.smem.'+id;
 function uid(){ return 's_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6) }
@@ -510,7 +525,7 @@ let settings = LS.get(K_SET, {
   key:'', model:'glm-5.2', temp:0.8, maxTok:0, ctx:20,
   userName:'我', sysPrompt:DEFAULT_SYS, regexRules:'', theme:'auto',
   visBase:'', visKey:'', visModel:'glm-4v-flash', softWords:'',
-  injTime:1, injWeather:1
+  injTime:1, injWeather:1, city:''
 });
 if(!settings.theme) settings.theme='auto';
 if(!settings.v4){ if(settings.maxTok==null||settings.maxTok===2048) settings.maxTok=0; settings.v4=1; LS.set(K_SET,settings) }
@@ -784,7 +799,7 @@ function fillDrawer(){
   $('sTemp').value=settings.temp; $('sMaxTok').value=settings.maxTok; $('sCtx').value=settings.ctx;
   $('sUserName').value=settings.userName; $('sSysPrompt').value=settings.sysPrompt; $('sRegex').value=settings.regexRules;
   $('sVisModel').value=settings.visModel||''; $('sVisKey').value=settings.visKey||''; $('sVisBase').value=settings.visBase||''; $('sSoftWords').value=settings.softWords||'';
-  $('sInjTime').checked=!!settings.injTime; $('sInjWeather').checked=!!settings.injWeather; updWStat();
+  $('sInjTime').checked=!!settings.injTime; $('sInjWeather').checked=!!settings.injWeather; $('sCity').value=settings.city||''; updWStat();
   updMemSub(); updSetSub();
   updateBaseHint(); renderSeg(); renderSessionList();
 }
@@ -832,7 +847,7 @@ function readSettingsForm(){
     sysPrompt:$('sSysPrompt').value, regexRules:$('sRegex').value,
     visModel:$('sVisModel').value.trim(), visKey:$('sVisKey').value.trim(), visBase:normalizeBase($('sVisBase').value.trim()),
     softWords:$('sSoftWords').value,
-    injTime:$('sInjTime').checked?1:0, injWeather:$('sInjWeather').checked?1:0,
+    injTime:$('sInjTime').checked?1:0, injWeather:$('sInjWeather').checked?1:0, city:$('sCity').value.trim(),
     theme:settings.theme||'auto', v4:1 });
 }
 function saveAll(){
@@ -1034,6 +1049,7 @@ async function refreshWeather(){
 function envLine(){
   let s='';
   if(settings.injTime) s='現在時間：'+nowStr();
+  if(settings.city){ if(s) s+='；'; s+='所在地：'+settings.city }
   if(settings.injWeather){
     const w=LS.get('rpf.weather',null);
     if(w&&w.text){ if(s) s+='；'; s+='所在地天氣：'+w.text }

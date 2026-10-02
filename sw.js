@@ -1,5 +1,5 @@
 /* RP Shell service worker — 離線快取外殼，API 請求不攔 */
-const VER = 'rpf-v5.1';
+const VER = 'rpf-v5.2';
 const CORE = ['./', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
