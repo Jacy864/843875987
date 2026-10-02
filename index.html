@@ -504,7 +504,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.4';
+const APP_VER='rpf-v5.5';
 const K_SET='rpf.settings', K_PERSONA='rpf.persona', K_SESSIONS='rpf.sessions', K_ACT='rpf.activeSession', K_MEMP='rpf.memPrompt', K_PROJ='rpf.projects';
 const K_SCHAT=id=>'rpf.schat.'+id, K_SMEM=id=>'rpf.smem.'+id;
 function uid(){ return 's_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6) }
@@ -1051,12 +1051,18 @@ async function refreshWeather(){
   const w=LS.get('rpf.weather',null);
   if(w&&w.d===todayStr()&&(w.city||'')===city) return w;
   try{
-    let lat,lon;
+    let lat,lon,geo='';
     if(city){
-      const g=await fetch('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(city)+'&count=1&language=zh').then(r=>r.json());
-      const hit=g&&g.results&&g.results[0];
+      let hit=null;
+      for(let i=0;i<2&&!hit;i++){
+        if(i) await new Promise(r=>setTimeout(r,800));
+        const g=await fetch('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(city)+'&count=5&language=zh').then(r=>r.json());
+        const rs=(g&&g.results)||[];
+        if(rs.length) hit=rs.sort((a,b)=>(b.population||0)-(a.population||0))[0];
+      }
       if(!hit){ setEnvErr('cityNF'); return null }
       lat=hit.latitude; lon=hit.longitude;
+      geo=hit.name+(hit.admin1?'·'+hit.admin1:'');
     }else{
       const pos=await getPos();
       if(!pos) return null;
@@ -1065,7 +1071,7 @@ async function refreshWeather(){
     const u='https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon+'&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code&timezone=auto';
     const r=await fetch(u); const j=await r.json();
     const c=j&&j.current; if(!c) throw new Error('no data');
-    const nw={d:todayStr(),city,text:(WMO_CN[c.weather_code]||'未知')+' '+Math.round(c.temperature_2m)+'°C（體感 '+Math.round(c.apparent_temperature)+'°C），濕度 '+c.relative_humidity_2m+'%'};
+    const nw={d:todayStr(),city,geo,text:(WMO_CN[c.weather_code]||'未知')+' '+Math.round(c.temperature_2m)+'°C（體感 '+Math.round(c.apparent_temperature)+'°C），濕度 '+c.relative_humidity_2m+'%'};
     LS.set('rpf.weather',nw); setEnvErr(''); updWStat(); return nw;
   }catch(e){ if(!(w&&w.text)) setEnvErr('wx:'+((e&&e.message)||e)); return (w&&w.text)?w:null }
 }
@@ -1088,7 +1094,7 @@ function updWStat(){
   const el=$('wStat'); if(!el) return;
   const w=LS.get('rpf.weather',null);
   if(w&&w.text&&w.d===todayStr()&&(w.city||'')===(settings.city||'').trim()){
-    el.textContent='目前快取'+(w.city?'（'+w.city+'）':'')+'：'+w.text+'｜'+APP_VER; return }
+    el.textContent='目前快取'+(w.geo?'（'+w.geo+'）':(w.city?'（'+w.city+'）':''))+'：'+w.text+'｜'+APP_VER; return }
   const e=LS.get('rpf.envErr','');
   const M={
     denied:'定位權限被拒——要到「瀏覽器的網站權限設定」允許此站存取位置（Android Chrome: ⋮ → 網站設定 → 位置；iOS: 系統設定 → 該App → 定位），改完回來點「立即刷新」',
