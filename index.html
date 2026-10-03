@@ -518,7 +518,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.12';
+const APP_VER='rpf-v5.13';
 const CITY_DATA={
 '北京市':['北京市'],'天津市':['天津市'],'上海市':['上海市'],'重慶市':['重慶市'],
 '廣東省':['廣州市','韶關市','深圳市','珠海市','汕頭市','佛山市','江門市','湛江市','茂名市','肇慶市','惠州市','梅州市','汕尾市','河源市','陽江市','清遠市','東莞市','中山市','潮州市','揭陽市','雲浮市'],
@@ -1396,7 +1396,7 @@ function reqHeaders(){
 }
 async function apiFetch(body){
   const res=await fetch(endpointUrl(),{ method:'POST', headers:reqHeaders(),
-    body:JSON.stringify(body) });
+    body:JSON.stringify(body), signal:(typeof abortCtrl!=='undefined'&&abortCtrl)?abortCtrl.signal:undefined });
   if(!res.ok){
     let msg='HTTP '+res.status;
     try{ const j=await res.json(); msg=(j.error&&j.error.message)||j.message||msg }catch(e){}
@@ -1412,7 +1412,7 @@ async function apiFetch(body){
 }
 async function apiStream(body,onDelta){
   const res=await fetch(endpointUrl(),{ method:'POST', headers:reqHeaders(),
-    body:JSON.stringify(body) });
+    body:JSON.stringify(body), signal:(typeof abortCtrl!=='undefined'&&abortCtrl)?abortCtrl.signal:undefined });
   if(!res.ok){
     let msg='HTTP '+res.status;
     try{ const j=await res.json(); msg=(j.error&&j.error.message)||j.message||msg }catch(e){}
@@ -1730,6 +1730,11 @@ function analyzeImport(){
   if(!sel.value&&r.speakers.length>1) sel.selectedIndex=1;
 }
 function doImport(){
+  const rawTxt=$('impText').value.trim();
+  if(rawTxt.startsWith('{')&&rawTxt.includes('"rp-shell"')){
+    try{ return restoreBackup(JSON.parse(rawTxt)) }
+    catch(e){ return toast('備份檔解析失敗：'+e.message) }
+  }
   const r=parseLogText($('impText').value);
   if(!r||!r.msgs.length) return toast('沒有識別到訊息，請檢查格式');
   const me=$('impUser').value;
@@ -1763,7 +1768,7 @@ function exportAll(){
   const data={ app:'rp-shell', ver:4, exported:new Date().toISOString(),
     settings, sessions, projects, activeSession:activeId,
     memories:{}, chats:{} };
-  sessions.forEach(s=>{ if(!s.projectId) memories[s.id]=memOf(s.id); chats[s.id]=LS.get(K_SCHAT(s.id),[]) });
+  sessions.forEach(s=>{ if(!s.projectId) data.memories[s.id]=memOf(s.id); data.chats[s.id]=LS.get(K_SCHAT(s.id),[]) });
   const blob=new Blob([JSON.stringify(data,null,1)],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
@@ -1773,8 +1778,11 @@ function exportAll(){
 function importAll(ev){
   const f=ev.target.files[0]; if(!f)return;
   const r=new FileReader();
-  r.onload=()=>{ try{
-    const j=JSON.parse(r.result);
+  r.onload=()=>{ try{ restoreBackup(JSON.parse(r.result)) }catch(e){ toast('導入失敗：'+e.message) } };
+  r.readAsText(f); ev.target.value='';
+}
+function restoreBackup(j){
+  try{
     if(j.app!=='rp-shell') throw new Error('不是本應用的備份檔');
     settings=Object.assign({}, settings, j.settings||{});
 if(!settings.theme) settings.theme='auto';
@@ -1818,9 +1826,9 @@ if(settings.injTime==null){ settings.injTime=1; settings.injWeather=1; LS.set(K_
       Object.keys(j.chats||{}).forEach(id=>LS.set(K_SCHAT(id),j.chats[id]));
       Object.keys(j.memories||{}).forEach(id=>LS.set(K_SMEM(id),j.memories[id]));
     }
+    $('impText').value=''; $('impBlock').style.display='none';
     applyTheme(); toast('導入成功'); renderHeader(); renderChat(); fillDrawer();
-  }catch(e){ toast('導入失敗：'+e.message) } };
-  r.readAsText(f); ev.target.value='';
+  }catch(e){ toast('導入失敗：'+e.message) }
 }
 function panicWipe(){
   if(!confirm('銷毀全部本機資料（人設/對話/記憶/Key）？不可恢復！')) return;
