@@ -196,6 +196,15 @@ footer{
 .field textarea{resize:vertical;min-height:74px;line-height:1.6;font-size:13.5px}
 .field input:focus,.field textarea:focus{border-color:var(--redT)}
 .hint{font-size:11px;color:var(--tx3);margin-top:4px;line-height:1.5}
+.memToggle{float:right;cursor:pointer;color:var(--redT);font-size:12px;font-weight:400}
+.memSec{border:1px solid var(--brd);border-radius:10px;margin-bottom:6px;background:var(--elev);overflow:hidden}
+.memSec summary{list-style:none;cursor:pointer;padding:9px 12px;font-size:13px;color:var(--tx2);font-weight:500;user-select:none;display:flex;align-items:center;gap:6px}
+.memSec summary::-webkit-details-marker{display:none}
+.memSec summary::before{content:'▸';font-size:11px;color:var(--tx3);transition:transform .15s}
+.memSec[open] summary::before{transform:rotate(90deg)}
+.memSec .memCnt{font-size:11px;color:var(--tx3);font-weight:400}
+.memSec textarea{display:block;width:calc(100% - 20px);margin:0 10px 10px;background:var(--surf);border:1px solid var(--brd);border-radius:8px;color:var(--tx);font:inherit;font-size:13px;line-height:1.6;padding:8px 10px;outline:none;resize:vertical;min-height:64px}
+.memSec textarea:focus{border-color:var(--redT)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .miniBtn{
   display:inline-flex;align-items:center;justify-content:center;
@@ -351,14 +360,14 @@ footer{
           <div class="hint">注入在所有對話最前面；{{char}} {{user}} 自動替換</div>
         </div>
         <hr class="divider">
-        <div class="secLabel">長期記憶 · <span id="memSub">已存 0 條</span></div>
+        <div class="secLabel">長期記憶 · <span id="memSub">已存 0 條</span> · <span class="memToggle" onclick="toggleAllMem()">全開/全收</span></div>
         <div class="field">
-          <label id="memLabel">記憶內容（每次對話自動注入 system，僅此對話）</label>
-          <textarea id="mText" style="min-height:130px" oninput="updMemSub()" placeholder="關鍵事件、關係進度、用戶偏好、承諾…"></textarea>
+          <label id="memLabel">記憶內容（每次對話自動注入 system，僅此對話；各分區可直接編輯，改動即時保存）</label>
+          <div id="memAcc"></div>
         </div>
-        <button class="miniBtn pri" style="margin-bottom:10px" onclick="genMemorySummary()">自動摘要對話</button>
+        <button class="miniBtn pri" style="margin-bottom:10px" onclick="genMemorySummary()">自動摘要對話（融合舊記憶）</button>
         <div class="field">
-          <label>摘要指令（可改）</label>
+          <label>摘要附加指令（可改，拼在標準指令之後）</label>
           <textarea id="mPrompt" style="min-height:80px"></textarea>
         </div>
         <hr class="divider">
@@ -509,7 +518,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.8';
+const APP_VER='rpf-v5.9';
 const CITY_DATA={
 '北京市':['北京市'],'天津市':['天津市'],'上海市':['上海市'],'重慶市':['重慶市'],
 '廣東省':['廣州市','韶關市','深圳市','珠海市','汕頭市','佛山市','江門市','湛江市','茂名市','肇慶市','惠州市','梅州市','汕尾市','河源市','陽江市','清遠市','東莞市','中山市','潮州市','揭陽市','雲浮市'],
@@ -553,12 +562,10 @@ const DEFAULT_SYS = `[演出協議]
 4. 不替 {{user}} 決定言行與心理。每次回覆聚焦 {{char}} 的反應：動作、神態、台詞。
 5. 文風：生動具體，展示而非概述；對話與動作交織，每次回覆 2-4 段。`;
 
-const DEFAULT_MEM_PROMPT = `將以下對話提煉成角色扮演長期記憶筆記。只記關鍵事實，分條列出：
-1. 關係進度與稱呼變化
-2. 關鍵事件（時間順序）
-3. {{user}} 的個人資訊、偏好、承諾
-4. 未解決的伏筆與約定
-輸出純文字清單，不要寒暄，不要復述原文。`;
+const DEFAULT_MEM_PROMPT = `（拼在標準融合指令之後，可按需修改）
+- 事實優先：只記劇情支撐的內容，推測標（推測）
+- 稱呼、關係變化要寫明是誰先提出的
+- 涉及 {{user}} 的隱私偏好記入 likes，角色對 {{user}} 的觀感變化記入 relation`;
 
 let settings = LS.get(K_SET, {
   fmt:'openai',
@@ -586,7 +593,37 @@ function curPersona(){
 function chat(){ return LS.get(K_SCHAT(activeId), []) }
 function saveChat(m){ LS.set(K_SCHAT(activeId), m); touch() }
 function touch(){ const s=curSession(); if(s){ s.lastAt=Date.now(); LS.set(K_SESSIONS,sessions); const pr=projOf(s); if(pr){ pr.lastAt=Date.now(); LS.set(K_PROJ,projects) } } }
-function memOf(id){ const s=sessions.find(x=>x.id===id); const pr=projOf(s); return pr?String(pr.mem||''):LS.get(K_SMEM(id),'') }
+const MEM_SECTIONS=[
+  {k:'user',     t:'用戶角色',    hint:'{{user}} 的姓名、身份、外貌、背景…'},
+  {k:'persona',  t:'AI角色形象',  hint:'角色在劇情中展現的性格、形象變化'},
+  {k:'likes',    t:'喜好與偏好',  hint:'雙方的口味、偏好、忌諱、習慣'},
+  {k:'relation', t:'關係進度',    hint:'關係階段、親密度、情感變化'},
+  {k:'address',  t:'稱呼變化',    hint:'誰稱呼誰什麼、何時改口'},
+  {k:'events',   t:'關鍵事件',    hint:'影響劇情走向的事件，按時間排序'},
+  {k:'promises', t:'約定與伏筆',  hint:'承諾、約定、未解決的線索'},
+  {k:'secret',   t:'秘密與暗線',  hint:'未說破的事、心裡話、隱藏關係'},
+  {k:'world',    t:'場景與世界觀', hint:'所在地點、生活環境、時間背景'},
+  {k:'other',    t:'其他備註',    hint:'不屬於以上分類的內容'}
+];
+function emptyMem(){ return {v:2, s:{}} }
+function normMem(m){
+  const o=emptyMem();
+  if(m&&typeof m==='object'&&m.s&&typeof m.s==='object'){
+    MEM_SECTIONS.forEach(x=>{ if(typeof m.s[x.k]==='string') o.s[x.k]=m.s[x.k] });
+    return o;
+  }
+  const t=String(m||'').trim();
+  if(t) o.s.other=t;
+  return o;
+}
+function memText(m){
+  if(m&&typeof m==='object'){
+    const o=normMem(m);
+    return MEM_SECTIONS.map(x=>{ const v=(o.s[x.k]||'').trim(); return v?('【'+x.t+'】\n'+v):'' }).filter(Boolean).join('\n');
+  }
+  return String(m||'').trim();
+}
+function memOf(id){ const s=sessions.find(x=>x.id===id); const pr=projOf(s); return pr?(pr.mem||''):LS.get(K_SMEM(id),'') }
 function setMem(id,v){ const s=sessions.find(x=>x.id===id); const pr=projOf(s);
   if(pr){ pr.mem=v; pr.lastAt=Date.now(); LS.set(K_PROJ,projects) } else LS.set(K_SMEM(id),v) }
 
@@ -595,7 +632,7 @@ function migrate(){
   if(!Array.isArray(projects)) projects=[];
   projects.forEach(p=>{
     if(!p.persona) p.persona={name:p.name||'新角色',desc:'',first:''};
-    if(typeof p.mem!=='string') p.mem='';
+    if(typeof p.mem!=='string'&&!(p.mem&&typeof p.mem==='object'&&p.mem.s)) p.mem='';
   });
   const legacyPersona=LS.get(K_PERSONA,null);
   sessions.forEach(s=>{
@@ -676,7 +713,7 @@ function renderSessionList(){
   const box=$('sessList'); box.innerHTML='';
   projects.forEach(p=>{
     const ss=sessions.filter(s=>s.projectId===p.id);
-    const memLines=(p.mem||'').split('\n').map(x=>x.trim()).filter(Boolean).length;
+    const memLines=memText(p.mem).split('\n').map(x=>x.trim()).filter(Boolean).length;
     const d=document.createElement('div');
     d.className='projItem';
     d.innerHTML='<span class="pav">'+FOLDER_SVG+'</span>'+
@@ -783,7 +820,16 @@ function assignToProject(sid){
   if(!(i>=0&&i<projects.length)) return toast('編號無效');
   const p=projects[i];
   const ownMem=LS.get(K_SMEM(sid),'');
-  if(ownMem) p.mem=p.mem? p.mem+'\n\n—— 併入「'+(s.title||'對話')+'」的記憶 ——\n'+ownMem : ownMem;
+  const oo=normMem(ownMem);
+  const hasOwn=MEM_SECTIONS.some(x=>(oo.s[x.k]||'').trim());
+  if(hasOwn){
+    const po=normMem(p.mem); const tag='\n—— 併入「'+(s.title||'對話')+'」的記憶 ——\n';
+    MEM_SECTIONS.forEach(x=>{
+      const ov=(oo.s[x.k]||'').trim(), pv=(po.s[x.k]||'').trim();
+      if(ov) po.s[x.k]=pv?pv+tag+ov:ov;
+    });
+    p.mem=po;
+  }
   if((!p.persona.name||p.persona.name==='新角色')&&s.persona&&s.persona.name&&s.persona.name!=='新角色'){
     p.persona={name:s.persona.name,nick:s.persona.nick||'',desc:s.persona.desc||'',first:s.persona.first||''};
   }
@@ -792,7 +838,7 @@ function assignToProject(sid){
   LS.set(K_PROJ,projects); LS.set(K_SESSIONS,sessions);
   renderSessionList();
   if(sid===activeId){ renderHeader(); fillDrawer() }
-  toast('已移入「'+p.name+'」'+(ownMem?'（原有記憶併入項目記憶）':''));
+  toast('已移入「'+p.name+'」'+(hasOwn?'（原有記憶併入項目記憶）':''));
 }
 function unassignFromProject(sid){
   const s=sessions.find(x=>x.id===sid); const p=projOf(s); if(!s||!p) return;
@@ -820,10 +866,34 @@ function sessDel(id){
 
 /* ---------- 表單填充與保存 ---------- */
 const FMT_NAMES={openai:'普通 API',coding:'Coding Plan',anthropic:'Coding Plan·Anthropic'};
-function memLineCount(){ const t=memOf(activeId)||''; const l=t.split('\n').map(x=>x.trim()).filter(Boolean); return l.length }
-function updMemSub(){
-  const l=($('mText').value||'').split('\n').map(x=>x.trim()).filter(Boolean).length;
-  $('memSub').textContent='已存 '+l+' 條';
+function memLineCount(){ const o=normMem(memOf(activeId)); return MEM_SECTIONS.reduce((n,x)=>n+((o.s[x.k]||'').split('\n').map(l=>l.trim()).filter(Boolean)).length,0) }
+function updMemSub(){ $('memSub').textContent='已存 '+memLineCount()+' 條' }
+function renderMemAcc(){
+  const host=$('memAcc'); if(!host) return;
+  const o=normMem(memOf(activeId));
+  host.innerHTML='';
+  MEM_SECTIONS.forEach(x=>{
+    const d=document.createElement('details'); d.className='memSec'; d.dataset.k=x.k;
+    const cnt=((o.s[x.k]||'').split('\n').map(s=>s.trim()).filter(Boolean)).length;
+    d.innerHTML='<summary>'+x.t+(cnt?' <span class="memCnt">'+cnt+' 條</span>':' <span class="memCnt"></span>')+'</summary>'+
+      '<textarea placeholder="'+esc(x.hint)+'"></textarea>';
+    const ta=d.querySelector('textarea'); ta.value=o.s[x.k]||'';
+    ta.addEventListener('input',()=>onMemInput(x.k,ta.value));
+    host.appendChild(d);
+  });
+}
+function onMemInput(k,v){
+  const o=normMem(memOf(activeId)); o.s[k]=v; setMem(activeId,o); updMemSub();
+  const d=document.querySelector('#memAcc details[data-k="'+k+'"]');
+  if(d){
+    const cnt=(v.split('\n').map(s=>s.trim()).filter(Boolean)).length;
+    const sp=d.querySelector('.memCnt'); if(sp) sp.textContent=cnt?cnt+' 條':'';
+  }
+}
+function toggleAllMem(){
+  const all=[...document.querySelectorAll('#memAcc details')];
+  const anyClosed=all.some(d=>!d.open);
+  all.forEach(d=>d.open=anyClosed);
 }
 function syncCharName(from){
   const v=$(from).value;
@@ -856,7 +926,7 @@ function fillDrawer(){
   $('personaLabel').textContent=pr? '角色人設（項目「'+pr.name+'」共享）' : '角色人設（此 session 獨立）';
   $('memLabel').textContent=pr? '記憶內容（每次對話自動注入 system，項目「'+pr.name+'」共享）' : '記憶內容（每次對話自動注入 system，僅此對話）';
   $('cName').value=p.name||''; $('cName2').value=p.name||''; $('cNick').value=p.nick||''; $('cDesc').value=p.desc||''; $('cFirst').value=p.first||'';
-  $('mText').value=memOf(activeId); $('mPrompt').value=LS.get(K_MEMP,DEFAULT_MEM_PROMPT);
+  $('mPrompt').value=LS.get(K_MEMP,DEFAULT_MEM_PROMPT); renderMemAcc();
   $('sFmt').value=settings.fmt||'openai';
   $('sBaseUrl').value=settings.baseUrl; $('sKey').value=settings.key; $('sModel').value=settings.model;
   $('sTemp').value=settings.temp; $('sMaxTok').value=settings.maxTok; $('sCtx').value=settings.ctx;
@@ -924,7 +994,6 @@ function saveAll(){
     s.persona=persona;
     if(!s.title||s.title==='新角色'||s.title==='新對話'||s.title===oldName) s.title=name;
   }
-  setMem(activeId,$('mText').value);
   LS.set(K_MEMP,$('mPrompt').value||DEFAULT_MEM_PROMPT);
   const prevCity=(settings.city||'').trim();
   readSettingsForm();
@@ -956,27 +1025,49 @@ function importCharCard(){
 async function genMemorySummary(){
   const h=chat(); if(h.length<4) return toast('對話太少，先聊幾輪');
   if(!settings.key) return toast('摘要需真實 API Key');
-  setMem(activeId,$('mText').value);
-  const sys='你是記憶整理助手。'+($('mPrompt').value||DEFAULT_MEM_PROMPT)
-    .replace(/\{\{char\}\}/g,curPersona().name).replace(/\{\{user\}\}/g,settings.userName);
-  const convo=h.map(m=>(m.role==='user'?'[用戶]':'[角色]')+soften(m.content)).join('\n').slice(-12000);
+  if(settings.model==='mock') return toast('mock 模式不支援摘要');
+  const p=curPersona();
+  const ph=s=>String(s||'').replace(/\{\{char\}\}/g,p.name).replace(/\{\{user\}\}/g,settings.userName||'我');
+  const keys=MEM_SECTIONS.map(x=>x.k);
+  const guide=MEM_SECTIONS.map(x=>x.k+'＝'+x.t+'（'+ph(x.hint)+'）').join('；');
+  const extra=ph($('mPrompt').value).trim();
+  const sys='你是角色扮演的記憶整理助手，維護一份結構化長期記憶。\n'+
+    '你會收到【當前記憶】（JSON，可能為空）與【對話記錄】。\n'+
+    '請將兩者融合，輸出新的完整記憶 JSON，規則：\n'+
+    '1. 鍵固定為：'+keys.join(', ')+'——全部都要輸出，無內容的欄位用空字串\n'+
+    '2. 每欄是該分類的最新完整筆記：舊記憶仍正確的保留、被新劇情推翻的改寫、新出現的補入，不要丟失仍有效的舊信息\n'+
+    '3. 每欄內分條列行（一行一條），只記關鍵事實與穩定狀態，不記一次性情緒；推測內容行尾標（推測）\n'+
+    '4. events 欄按時間先後排列，可加編號\n'+
+    '5. 只輸出 JSON 本體，不要 markdown 圍欄，不要任何解釋\n'+
+    '分類說明：'+guide+'\n'+(extra?('補充要求：'+extra):'');
+  const o=normMem(memOf(activeId));
+  const oldObj={}; keys.forEach(k=>{ if((o.s[k]||'').trim()) oldObj[k]=o.s[k].trim() });
+  const convo=h.map(m=>(m.role==='user'?'[用戶]':'[角色]')+soften(m.content)).join('\n').slice(-16000);
+  const userMsg='【當前記憶】\n'+(Object.keys(oldObj).length?JSON.stringify(oldObj,null,1):'（空）')+'\n\n【對話記錄】\n'+convo;
   let body;
   if((settings.fmt||'openai')==='anthropic'){
-    body={ model:settings.model, stream:false, temperature:0.3, max_tokens:1024,
-      system:sys, messages:[{role:'user',content:convo}] };
+    body={ model:settings.model, stream:false, temperature:0.3, max_tokens:4000, system:sys, messages:[{role:'user',content:userMsg}] };
   }else{
-    body={ model:settings.model, stream:false, temperature:0.3, max_tokens:1024,
-      messages:[{role:'system',content:sys},{role:'user',content:convo}] };
+    body={ model:settings.model, stream:false, temperature:0.3, max_tokens:4000, messages:[{role:'system',content:sys},{role:'user',content:userMsg}] };
   }
   toast('摘要生成中…');
   try{
     const r=await apiFetch(body);
-    const sum=(r.choices&&r.choices[0]&&r.choices[0].message&&r.choices[0].message.content||'').trim();
-    if(!sum) return toast('摘要為空');
-    const old=memOf(activeId);
-    $('mText').value=(old?old+'\n\n—— 更新 ——\n':'')+sum;
-    setMem(activeId,$('mText').value); $('memSub').textContent='已存 '+memLineCount()+' 條 · 自動注入對話';
-    toast('已併入長期記憶');
+    let out=(r.choices&&r.choices[0]&&r.choices[0].message&&r.choices[0].message.content||'').trim();
+    if(!out) return toast('摘要為空');
+    out=out.replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+    let j=null;
+    try{ j=JSON.parse(out) }catch(e){
+      const m2=out.match(/\{[\s\S]*\}/); if(m2){ try{ j=JSON.parse(m2[0]) }catch(e2){} }
+    }
+    if(!j||typeof j!=='object'||Array.isArray(j)){
+      o.s.other=((o.s.other||'').trim()?o.s.other.trim()+'\n':'')+out;
+      setMem(activeId,o); renderMemAcc(); updMemSub();
+      return toast('模型未按 JSON 輸出，已併入「其他備註」（可手動搬移）');
+    }
+    keys.forEach(k=>{ if(typeof j[k]==='string') o.s[k]=j[k].trim() });
+    setMem(activeId,o); renderMemAcc(); updMemSub();
+    toast('記憶已更新（舊記憶＋新對話融合覆蓋）');
   }catch(e){ toast('摘要失敗：'+e.message) }
 }
 
@@ -1048,6 +1139,7 @@ function renderChat(){
   h.forEach((m,i)=>main.appendChild(msgNode(m,i)));
   scrollBottom(true);
 }
+function stripPhotoMark(s){ return String(s||'').replace(/\[(我分享了一張照片：|分享了一張照片，)[\s\S]*?\]$/,'').replace(/\s+$/,'') }
 function msgNode(m,i){
   const isU=m.role==='user';
   const d=document.createElement('div'); d.className='msg '+(isU?'user':'ai');
@@ -1055,15 +1147,22 @@ function msgNode(m,i){
   who.innerHTML='<span>'+esc(isU?(settings.userName||'我'):(curPersona().name||'角色'))+'</span>'+
     '<span class="act" data-edit="'+i+'">改</span><span class="act del" data-del1="'+i+'">刪</span>';
   const bub=document.createElement('div'); bub.className='bubble';
-  if(m.img) bub.innerHTML='<img class="msgPhoto" src="'+m.img+'" alt="照片">'+fmt(m.content);
+  if(m.img){
+    const shown=stripPhotoMark(m.content);
+    bub.innerHTML='<img class="msgPhoto" src="'+m.img+'" alt="照片">'+(shown?fmt(shown):'');
+  }
   else bub.innerHTML=fmt(m.content);
   d.appendChild(who); d.appendChild(bub);
   d.onclick=e=>{
     const t=e.target;
     if(!t||!t.getAttribute) return;
     if(t.hasAttribute('data-edit')){
-      const h=chat(); const nv=prompt('編輯訊息：',h[i].content);
-      if(nv!==null){ h[i].content=nv; saveChat(h); renderChat() }
+      const h=chat(); const orig=h[i].content||'';
+      let show=orig, mark='';
+      const mm=orig.match(/\[(我分享了一張照片：|分享了一張照片，)[\s\S]*?\]$/);
+      if(mm&&h[i].img){ mark=mm[0]; show=orig.slice(0,orig.length-mark.length).trim() }
+      const nv=prompt('編輯訊息：',show);
+      if(nv!==null){ h[i].content=mark?((nv?nv+'\n':'')+mark):nv; saveChat(h); renderChat() }
     }else if(t.hasAttribute('data-del1')){
       const h=chat(); h.splice(i,1); saveChat(h); renderChat(); renderHeader();
     }
@@ -1170,7 +1269,7 @@ function updWStat(){
 
 function buildMessages(splitSystem,enLastUser){
   const p=curPersona();
-  const mem=memOf(activeId);
+  const mem=memText(memOf(activeId));
   const ph=s=>s.replace(/\{\{char\}\}/g,p.name).replace(/\{\{user\}\}/g,settings.userName||'我');
   const sys=[envLine(), settings.sysPrompt,
     p.nick?('（{{user}} 私底下稱呼 {{char}} 為「'+p.nick+'」；聽到這個稱呼就是在叫你，自然回應即可）'):'',
@@ -1606,7 +1705,7 @@ if(settings.injTime==null){ settings.injTime=1; settings.injWeather=1; LS.set(K_
     if(j.ver>=4&&Array.isArray(j.projects)){
       projects=j.projects.map(p=>({ id:p.id, name:p.name||'項目',
         persona:p.persona||{name:p.name||'新角色',desc:'',first:''},
-        mem:typeof p.mem==='string'?p.mem:'', createdAt:p.createdAt||Date.now(), lastAt:p.lastAt||Date.now() }));
+        mem:(p.mem&&typeof p.mem==='object')?p.mem:(typeof p.mem==='string'?p.mem:''), createdAt:p.createdAt||Date.now(), lastAt:p.lastAt||Date.now() }));
     }else{
       projects=[];
     }
