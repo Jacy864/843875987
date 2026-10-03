@@ -518,7 +518,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.10';
+const APP_VER='rpf-v5.11';
 const CITY_DATA={
 '北京市':['北京市'],'天津市':['天津市'],'上海市':['上海市'],'重慶市':['重慶市'],
 '廣東省':['廣州市','韶關市','深圳市','珠海市','汕頭市','佛山市','江門市','湛江市','茂名市','肇慶市','惠州市','梅州市','汕尾市','河源市','陽江市','清遠市','東莞市','中山市','潮州市','揭陽市','雲浮市'],
@@ -1059,9 +1059,10 @@ async function genMemorySummary(){
   const userMsg='【當前記憶】\n'+(Object.keys(oldObj).length?JSON.stringify(oldObj,null,1):'（空）')+'\n\n【對話記錄】\n'+convo;
   let body;
   if((settings.fmt||'openai')==='anthropic'){
-    body={ model:settings.model, stream:true, temperature:0.3, max_tokens:4000, system:sys, messages:[{role:'user',content:userMsg}] };
+    body={ model:settings.model, stream:true, temperature:0.3, max_tokens:8000, system:sys, messages:[{role:'user',content:userMsg}] };
   }else{
-    body={ model:settings.model, stream:true, temperature:0.3, max_tokens:4000, messages:[{role:'system',content:sys},{role:'user',content:userMsg}] };
+    body={ model:settings.model, stream:true, temperature:0.3, max_tokens:8000, messages:[{role:'system',content:sys},{role:'user',content:userMsg}] };
+    if(/bigmodel|z\.ai/.test(endpointUrl())) body.thinking={type:'disabled'};
   }
   memBusy=true;
   const btn=$('memGenBtn'), btnOld=btn.textContent;
@@ -1071,10 +1072,24 @@ async function genMemorySummary(){
   const tick=setInterval(upd,1000); upd();
   try{
     toast('摘要生成中…');
+    apiStream.lastFinish=null; apiStream.lastThink=0;
     sum=await apiStream(body,t=>{ sum=t; upd() });
     clearInterval(tick);
     let out=(sum||'').trim();
-    if(!out) return toast('摘要為空');
+    if(!out){
+      /* 流式無正文：思考耗盡 token 或端點流式異常 → 非流式重試 */
+      const fin=apiStream.lastFinish, th=apiStream.lastThink;
+      btn.textContent='非流式重試中…';
+      toast('流式無輸出'+(th?('（思考已耗 '+th+' 字）'):'')+'，改非流式重試…');
+      const nb=JSON.parse(JSON.stringify(body)); nb.stream=false; delete nb.thinking;
+      const r=await apiFetch(nb);
+      const ch0=(r.choices&&r.choices[0])||{};
+      out=((ch0.message&&ch0.message.content)||'').trim();
+      if(!out){
+        const fin2=ch0.finish_reason||fin||'未知';
+        throw new Error('輸出為空（finish='+fin2+(th?'，思考'+th+'字':'')+'），可縮短上下文後重試');
+      }
+    }
     out=out.replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
     let j=null;
     try{ j=JSON.parse(out) }catch(e){
@@ -1385,9 +1400,13 @@ async function apiStream(body,onDelta){
         let piece='';
         if(isAnth){
           if(j.type==='content_block_delta'&&j.delta) piece=j.delta.text||'';
+          if(j.type==='message_delta'&&j.delta&&j.delta.stop_reason) apiStream.lastFinish=j.delta.stop_reason;
         }else{
-          const delta=j.choices&&j.choices[0]&&(j.choices[0].delta||j.choices[0].message);
+          const ch0=j.choices&&j.choices[0];
+          const delta=ch0&&(ch0.delta||ch0.message);
           piece=(delta&&delta.content)||'';
+          if(delta&&delta.reasoning_content) apiStream.lastThink=(apiStream.lastThink||0)+delta.reasoning_content.length;
+          if(ch0&&ch0.finish_reason) apiStream.lastFinish=ch0.finish_reason;
         }
         if(piece){ full+=piece; onDelta(full) }
       }catch(e){}
@@ -1395,6 +1414,7 @@ async function apiStream(body,onDelta){
   }
   return full;
 }
+apiStream.lastFinish=null; apiStream.lastThink=0;
 
 /* ---------- 敏感詞軟化：存儲原文，發送時替換 ---------- */
 /* 內建詞表以 \u 轉義存放（源文件不留明文），簡繁雙版本；RESTORE 為低誤傷還原表（模型輸出→顯示） */
