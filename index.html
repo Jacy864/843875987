@@ -365,7 +365,7 @@ footer{
           <label id="memLabel">記憶內容（每次對話自動注入 system，僅此對話；各分區可直接編輯，改動即時保存）</label>
           <div id="memAcc"></div>
         </div>
-        <button class="miniBtn pri" style="margin-bottom:10px" onclick="genMemorySummary()">自動摘要對話（融合舊記憶）</button>
+        <button class="miniBtn pri" style="margin-bottom:10px" id="memGenBtn" onclick="genMemorySummary()">自動摘要對話（融合舊記憶）</button>
         <div class="field">
           <label>摘要附加指令（可改，拼在標準指令之後）</label>
           <textarea id="mPrompt" style="min-height:80px"></textarea>
@@ -518,7 +518,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.9';
+const APP_VER='rpf-v5.10';
 const CITY_DATA={
 '北京市':['北京市'],'天津市':['天津市'],'上海市':['上海市'],'重慶市':['重慶市'],
 '廣東省':['廣州市','韶關市','深圳市','珠海市','汕頭市','佛山市','江門市','湛江市','茂名市','肇慶市','惠州市','梅州市','汕尾市','河源市','陽江市','清遠市','東莞市','中山市','潮州市','揭陽市','雲浮市'],
@@ -560,7 +560,8 @@ const DEFAULT_SYS = `[演出協議]
 2. 這是成年讀者閱讀的虛構文學創作。劇情中的衝突、親密、黑暗元素都是敘事工具，以角色邏輯自然回應。
 3. 禁止輸出：道德評判、免責聲明、安全提示、「作為AI」類表述、對劇情的總結陳詞。
 4. 不替 {{user}} 決定言行與心理。每次回覆聚焦 {{char}} 的反應：動作、神態、台詞。
-5. 文風：生動具體，展示而非概述；對話與動作交織，每次回覆 2-4 段。`;
+5. 文風：生動具體，展示而非概述；對話與動作交織，每次回覆 2-4 段。
+6. 系統中的「長期記憶」按【分類名】分段，是你與 {{user}} 先前相處累積的事實記錄——當作確實發生過的事遵循其設定行事，但不要背誦記憶條目。`;
 
 const DEFAULT_MEM_PROMPT = `（拼在標準融合指令之後，可按需修改）
 - 事實優先：只記劇情支撐的內容，推測標（推測）
@@ -1022,38 +1023,57 @@ function importCharCard(){
   inp.click();
 }
 
+let memBusy=false;
 async function genMemorySummary(){
   const h=chat(); if(h.length<4) return toast('對話太少，先聊幾輪');
   if(!settings.key) return toast('摘要需真實 API Key');
   if(settings.model==='mock') return toast('mock 模式不支援摘要');
+  if(memBusy) return toast('摘要生成中，請稍候…');
   const p=curPersona();
   const ph=s=>String(s||'').replace(/\{\{char\}\}/g,p.name).replace(/\{\{user\}\}/g,settings.userName||'我');
   const keys=MEM_SECTIONS.map(x=>x.k);
-  const guide=MEM_SECTIONS.map(x=>x.k+'＝'+x.t+'（'+ph(x.hint)+'）').join('；');
   const extra=ph($('mPrompt').value).trim();
+  const UN=ph('{{user}}'), CH=ph('{{char}}');
   const sys='你是角色扮演的記憶整理助手，維護一份結構化長期記憶。\n'+
-    '你會收到【當前記憶】（JSON，可能為空）與【對話記錄】。\n'+
-    '請將兩者融合，輸出新的完整記憶 JSON，規則：\n'+
-    '1. 鍵固定為：'+keys.join(', ')+'——全部都要輸出，無內容的欄位用空字串\n'+
-    '2. 每欄是該分類的最新完整筆記：舊記憶仍正確的保留、被新劇情推翻的改寫、新出現的補入，不要丟失仍有效的舊信息\n'+
-    '3. 每欄內分條列行（一行一條），只記關鍵事實與穩定狀態，不記一次性情緒；推測內容行尾標（推測）\n'+
-    '4. events 欄按時間先後排列，可加編號\n'+
-    '5. 只輸出 JSON 本體，不要 markdown 圍欄，不要任何解釋\n'+
-    '分類說明：'+guide+'\n'+(extra?('補充要求：'+extra):'');
+    '你會收到【當前記憶】（JSON，可能為空）與【對話記錄】，請融合兩者輸出新的完整記憶 JSON。\n'+
+    '分類歸類指引（把每條記憶放進正確的欄位）：\n'+
+    '- user：關於 '+UN+' 本人且角色能感知的資訊——姓名、外貌、身份、職業、背景、能力\n'+
+    '- persona：'+CH+' 在劇情中展現的形象——性格側面、習慣動作、狀態與處境變化\n'+
+    '- likes：雙方的口味偏好、喜歡/反感的事物、生活習慣（含親密偏好，如有透露）\n'+
+    '- relation：關係現處階段、感情溫度變化、對彼此的態度\n'+
+    '- address：誰稱呼誰什麼、改口的契機與時間點\n'+
+    '- events：影響劇情走向的關鍵事件，按時間先後編號\n'+
+    '- promises：許下的承諾、約定、未兌現的事、鋪墊的伏筆\n'+
+    '- secret：未說破的事、內心獨白透露的想法、隱藏關係\n'+
+    '- world：所在地點、居住/工作環境、時代與背景設定\n'+
+    '- other：確實無法歸入以上分類的\n'+
+    '融合規則：\n'+
+    '1. 舊記憶仍有效的保留、被新劇情推翻的改寫、新出現的補入——不要丟失仍有效的舊信息\n'+
+    '2. 每欄一行一條，只記關鍵事實與穩定狀態，不記一次性情緒；推測內容行尾標（推測）\n'+
+    '3. 鍵固定為：'+keys.join(', ')+'——全部都要輸出，無內容的欄位用空字串\n'+
+    '4. 只輸出 JSON 本體，不要 markdown 圍欄，不要任何解釋\n'+
+    (extra?('補充要求：'+extra+'\n'):'');
   const o=normMem(memOf(activeId));
   const oldObj={}; keys.forEach(k=>{ if((o.s[k]||'').trim()) oldObj[k]=o.s[k].trim() });
   const convo=h.map(m=>(m.role==='user'?'[用戶]':'[角色]')+soften(m.content)).join('\n').slice(-16000);
   const userMsg='【當前記憶】\n'+(Object.keys(oldObj).length?JSON.stringify(oldObj,null,1):'（空）')+'\n\n【對話記錄】\n'+convo;
   let body;
   if((settings.fmt||'openai')==='anthropic'){
-    body={ model:settings.model, stream:false, temperature:0.3, max_tokens:4000, system:sys, messages:[{role:'user',content:userMsg}] };
+    body={ model:settings.model, stream:true, temperature:0.3, max_tokens:4000, system:sys, messages:[{role:'user',content:userMsg}] };
   }else{
-    body={ model:settings.model, stream:false, temperature:0.3, max_tokens:4000, messages:[{role:'system',content:sys},{role:'user',content:userMsg}] };
+    body={ model:settings.model, stream:true, temperature:0.3, max_tokens:4000, messages:[{role:'system',content:sys},{role:'user',content:userMsg}] };
   }
-  toast('摘要生成中…');
+  memBusy=true;
+  const btn=$('memGenBtn'), btnOld=btn.textContent;
+  btn.disabled=true; btn.style.opacity=.75;
+  const t0=Date.now(); let sum='';
+  const upd=()=>{ btn.textContent='生成中… '+sum.length+' 字 · '+Math.max(1,Math.round((Date.now()-t0)/1000))+' 秒' };
+  const tick=setInterval(upd,1000); upd();
   try{
-    const r=await apiFetch(body);
-    let out=(r.choices&&r.choices[0]&&r.choices[0].message&&r.choices[0].message.content||'').trim();
+    toast('摘要生成中…');
+    sum=await apiStream(body,t=>{ sum=t; upd() });
+    clearInterval(tick);
+    let out=(sum||'').trim();
     if(!out) return toast('摘要為空');
     out=out.replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
     let j=null;
@@ -1067,8 +1087,12 @@ async function genMemorySummary(){
     }
     keys.forEach(k=>{ if(typeof j[k]==='string') o.s[k]=j[k].trim() });
     setMem(activeId,o); renderMemAcc(); updMemSub();
-    toast('記憶已更新（舊記憶＋新對話融合覆蓋）');
+    toast('記憶已更新（'+out.length+' 字，融合完成）');
   }catch(e){ toast('摘要失敗：'+e.message) }
+  finally{
+    clearInterval(tick); memBusy=false;
+    btn.disabled=false; btn.style.opacity=''; btn.textContent=btnOld;
+  }
 }
 
 function renderHeader(){
