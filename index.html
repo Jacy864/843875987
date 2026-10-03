@@ -518,7 +518,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.11';
+const APP_VER='rpf-v5.12';
 const CITY_DATA={
 '北京市':['北京市'],'天津市':['天津市'],'上海市':['上海市'],'重慶市':['重慶市'],
 '廣東省':['廣州市','韶關市','深圳市','珠海市','汕頭市','佛山市','江門市','湛江市','茂名市','肇慶市','惠州市','梅州市','汕尾市','河源市','陽江市','清遠市','東莞市','中山市','潮州市','揭陽市','雲浮市'],
@@ -995,7 +995,7 @@ function saveAll(){
     s.persona=persona;
     if(!s.title||s.title==='新角色'||s.title==='新對話'||s.title===oldName) s.title=name;
   }
-  LS.set(K_MEMP,$('mPrompt').value||DEFAULT_MEM_PROMPT);
+  LS.set(K_MEMP,$('mPrompt').value);
   const prevCity=(settings.city||'').trim();
   readSettingsForm();
   if((settings.city||'').trim()!==prevCity){
@@ -1024,6 +1024,42 @@ function importCharCard(){
 }
 
 let memBusy=false;
+/* 截斷 JSON 修復：補未閉合的字串引號與括號 */
+function fixTruncJson(s){
+  let inStr=false,esc=false; const st=[];
+  for(let i=0;i<s.length;i++){
+    const c=s[i];
+    if(esc){esc=false;continue}
+    if(c==='\\'){esc=true;continue}
+    if(c==='"'){inStr=!inStr;continue}
+    if(inStr)continue;
+    if(c==='{'||c==='[')st.push(c);
+    else if(c==='}'||c===']')st.pop();
+  }
+  let fix='';
+  if(inStr)fix+='"';
+  fix+=st.reverse().map(c=>c==='{'?'}':']').join('');
+  return s+fix;
+}
+/* 從模型輸出提取記憶 JSON：剝 think 塊/圍欄/解釋文字，容錯截斷 */
+function extractMemJson(out){
+  extractMemJson.fixed=false;
+  let s=String(out||'').replace(/<think>[\s\S]*?<\/think>/gi,'').trim();
+  const first=s.indexOf('{');
+  if(first<0)return null;
+  s=s.slice(first);
+  const last=s.lastIndexOf('}');
+  if(last>=0)s=s.slice(0,last+1);
+  try{return JSON.parse(s)}catch(e){}
+  let t=s.replace(/[\s,]+$/,'');
+  for(let i=0;i<6;i++){
+    try{const j=JSON.parse(fixTruncJson(t));extractMemJson.fixed=true;return j}catch(e){}
+    const cut=t.replace(/,[^,]*$/,'');
+    if(cut===t)break;
+    t=cut.replace(/[\s,]+$/,'');
+  }
+  return null;
+}
 async function genMemorySummary(){
   const h=chat(); if(h.length<4) return toast('對話太少，先聊幾輪');
   if(!settings.key) return toast('摘要需真實 API Key');
@@ -1090,19 +1126,16 @@ async function genMemorySummary(){
         throw new Error('輸出為空（finish='+fin2+(th?'，思考'+th+'字':'')+'），可縮短上下文後重試');
       }
     }
-    out=out.replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
-    let j=null;
-    try{ j=JSON.parse(out) }catch(e){
-      const m2=out.match(/\{[\s\S]*\}/); if(m2){ try{ j=JSON.parse(m2[0]) }catch(e2){} }
-    }
+    const j=extractMemJson(out);
     if(!j||typeof j!=='object'||Array.isArray(j)){
-      o.s.other=((o.s.other||'').trim()?o.s.other.trim()+'\n':'')+out;
+      const clean=out.replace(/<think>[\s\S]*?<\/think>/gi,'').trim();
+      o.s.other=((o.s.other||'').trim()?o.s.other.trim()+'\n':'')+clean;
       setMem(activeId,o); renderMemAcc(); updMemSub();
       return toast('模型未按 JSON 輸出，已併入「其他備註」（可手動搬移）');
     }
     keys.forEach(k=>{ if(typeof j[k]==='string') o.s[k]=j[k].trim() });
     setMem(activeId,o); renderMemAcc(); updMemSub();
-    toast('記憶已更新（'+out.length+' 字，融合完成）');
+    toast('記憶已更新（'+out.length+' 字'+(extractMemJson.fixed?'，輸出截斷已自動修復':'')+'，融合完成）');
   }catch(e){ toast('摘要失敗：'+e.message) }
   finally{
     clearInterval(tick); memBusy=false;
