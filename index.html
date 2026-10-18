@@ -528,7 +528,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.16';
+const APP_VER='rpf-v5.17';
 const CITY_DATA={
 '北京市':['北京市'],'天津市':['天津市'],'上海市':['上海市'],'重慶市':['重慶市'],
 '廣東省':['廣州市','韶關市','深圳市','珠海市','汕頭市','佛山市','江門市','湛江市','茂名市','肇慶市','惠州市','梅州市','汕尾市','河源市','陽江市','清遠市','東莞市','中山市','潮州市','揭陽市','雲浮市'],
@@ -1293,6 +1293,7 @@ function pad2(n){ return String(n).padStart(2,'0') }
 function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()) }
 function nowStr(){ const d=new Date(); return todayStr()+'（週'+WD_CN[d.getDay()]+'）'+pad2(d.getHours())+':'+pad2(d.getMinutes()) }
 function tsTag(ts){ const d=new Date(ts); return '['+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+' '+pad2(d.getHours())+':'+pad2(d.getMinutes())+'] ' }
+function stripTs(s){ return (s||'').replace(/[【\[]\s*\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}\s*[】\]]\s*/g,'') }
 function gapStr(ms){
   const m=Math.floor(ms/60000); if(m<5) return '';
   if(m<60) return m+' 分鐘';
@@ -1394,7 +1395,7 @@ function buildMessages(splitSystem,enLastUser,hist){
   const p=curPersona();
   const mem=memText(memOf(activeId));
   const ph=s=>s.replace(/\{\{char\}\}/g,p.name).replace(/\{\{user\}\}/g,settings.userName||'我');
-  const sys=[envLine(), settings.sysPrompt,
+  const sys=[envLine(), settings.injTs?'（歷史訊息開頭的 [月-日 時:分] 是系統自動加的時間標記，僅供你感知對話間隔；你的回覆中絕對不要輸出這種標記或任何時間戳）':'', settings.sysPrompt,
     p.nick?('（{{user}} 私底下稱呼 {{char}} 為「'+p.nick+'」；聽到這個稱呼就是在叫你，自然回應即可）'):'',
     '# 角色設定\n'+p.desc, mem?('# 長期記憶\n'+mem):'']
     .filter(x=>x&&x.trim()).map(ph).join('\n\n');
@@ -1693,11 +1694,11 @@ async function onSend(){
 async function genReply(bub,hist){
   let final='', raw='';
   const streamOnce=async(en)=>{
-    return await apiStream(buildBody(true,en,hist),t=>{ raw=t; bub.innerHTML=fmt(t); scrollBottom() });
+    return await apiStream(buildBody(true,en,hist),t=>{ raw=t; bub.innerHTML=fmt(stripTs(t)); scrollBottom() });
   };
   try{
     if(settings.model==='mock'){
-      final=await mockStream(t=>{ raw=t; bub.innerHTML=fmt(t); scrollBottom() });
+      final=await mockStream(t=>{ raw=t; bub.innerHTML=fmt(stripTs(t)); scrollBottom() });
     }else{
       try{
         final=await streamOnce(null);
@@ -1717,7 +1718,7 @@ async function genReply(bub,hist){
       }
     }
   }catch(e){
-    if(e.name==='AbortError'){ final=raw }
+    if(e.name==='AbortError'){ final=stripTs(raw) }
     else{
       let hint=e.message;
       if(/credential|parse URL|Invalid URL|Failed to fetch/i.test(hint)){
@@ -1727,7 +1728,7 @@ async function genReply(bub,hist){
       return null;
     }
   }
-  final=applyPairs(final||'（無回應，可重試或開新對話）',BUILTIN_RESTORE);
+  final=stripTs(applyPairs(final||'（無回應，可重試或開新對話）',BUILTIN_RESTORE));
   final=applyRegex(final).trim();
   return final;
 }
