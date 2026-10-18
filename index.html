@@ -403,6 +403,7 @@ footer{
         </div>
         <div style="display:flex;gap:18px;flex-wrap:wrap;margin:4px 0 8px">
           <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="sInjTime"> 日期時間（每次發送即時）</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="sInjTs"> 訊息時間戳（模型可感知間隔）</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="sInjWeather"> 天氣（每日自動刷新）</label>
         </div>
         <div class="hint" id="wStat">無快取</div>
@@ -522,7 +523,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.14';
+const APP_VER='rpf-v5.15';
 const CITY_DATA={
 '北京市':['北京市'],'天津市':['天津市'],'上海市':['上海市'],'重慶市':['重慶市'],
 '廣東省':['廣州市','韶關市','深圳市','珠海市','汕頭市','佛山市','江門市','湛江市','茂名市','肇慶市','惠州市','梅州市','汕尾市','河源市','陽江市','清遠市','東莞市','中山市','潮州市','揭陽市','雲浮市'],
@@ -578,10 +579,11 @@ let settings = LS.get(K_SET, {
   key:'', model:'glm-5.2', temp:0.8, maxTok:0, ctx:20,
   userName:'我', sysPrompt:DEFAULT_SYS, regexRules:'', theme:'auto',
   visBase:'', visKey:'', visModel:'glm-4v-flash', softWords:'',
-  injTime:1, injWeather:1, city:'', prov:''
+  injTime:1, injTs:1, injWeather:1, city:'', prov:''
 });
 if(!settings.theme) settings.theme='auto';
 if(!settings.v4){ if(settings.maxTok==null||settings.maxTok===2048) settings.maxTok=0; settings.v4=1; LS.set(K_SET,settings) }
+if(settings.injTs==null){ settings.injTs=1; LS.set(K_SET,settings) }
 let sessions = LS.get(K_SESSIONS, null);
 let projects = LS.get(K_PROJ, []);
 let activeId = LS.get(K_ACT, null);
@@ -937,7 +939,7 @@ function fillDrawer(){
   $('sTemp').value=settings.temp; $('sMaxTok').value=settings.maxTok; $('sCtx').value=settings.ctx;
   $('sUserName').value=settings.userName; $('sSysPrompt').value=settings.sysPrompt; $('sRegex').value=settings.regexRules;
   $('sVisModel').value=settings.visModel||''; $('sVisKey').value=settings.visKey||''; $('sVisBase').value=settings.visBase||''; $('sSoftWords').value=settings.softWords||'';
-  $('sInjTime').checked=!!settings.injTime; $('sInjWeather').checked=!!settings.injWeather; initCitySel(); updWStat();
+  $('sInjTime').checked=!!settings.injTime; $('sInjTs').checked=!!settings.injTs; $('sInjWeather').checked=!!settings.injWeather; initCitySel(); updWStat();
   updMemSub(); updSetSub();
   updateBaseHint(); renderSeg(); renderSessionList();
 }
@@ -985,7 +987,7 @@ function readSettingsForm(){
     sysPrompt:$('sSysPrompt').value, regexRules:$('sRegex').value,
     visModel:$('sVisModel').value.trim(), visKey:$('sVisKey').value.trim(), visBase:normalizeBase($('sVisBase').value.trim()),
     softWords:$('sSoftWords').value,
-    injTime:$('sInjTime').checked?1:0, injWeather:$('sInjWeather').checked?1:0, city:$('sCitySel').value, prov:$('sProv').value,
+    injTime:$('sInjTime').checked?1:0, injTs:$('sInjTs').checked?1:0, injWeather:$('sInjWeather').checked?1:0, city:$('sCitySel').value, prov:$('sProv').value,
     theme:settings.theme||'auto', v4:1 });
 }
 function saveAll(){
@@ -1284,6 +1286,15 @@ const WD_CN=['日','一','二','三','四','五','六'];
 function pad2(n){ return String(n).padStart(2,'0') }
 function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()) }
 function nowStr(){ const d=new Date(); return todayStr()+'（週'+WD_CN[d.getDay()]+'）'+pad2(d.getHours())+':'+pad2(d.getMinutes()) }
+function tsTag(ts){ const d=new Date(ts); return '['+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+' '+pad2(d.getHours())+':'+pad2(d.getMinutes())+'] ' }
+function gapStr(ms){
+  const m=Math.floor(ms/60000); if(m<5) return '';
+  if(m<60) return m+' 分鐘';
+  const h=Math.floor(m/60), rm=m%60;
+  if(h<24) return h+' 小時'+(rm?' '+rm+' 分':'');
+  const d=Math.floor(h/24), rh=h%24;
+  return d+' 天'+(rh?' '+rh+' 小時':'');
+}
 function setEnvErr(s){ LS.set('rpf.envErr',s); updWStat() }
 function getPos(){ return new Promise(res=>{
   const c=LS.get('rpf.loc',null);
@@ -1336,7 +1347,14 @@ async function refreshWeather(){
 }
 function envLine(){
   let s='';
-  if(settings.injTime) s='現在時間：'+nowStr();
+  if(settings.injTime){
+    s='現在時間：'+nowStr();
+    const a=chat().filter(x=>x.ts);
+    let ref=a.length?a[a.length-1].ts:0;
+    if(a.length>=2 && Date.now()-ref<120000) ref=a[a.length-2].ts;
+    const g=ref?gapStr(Date.now()-ref):'';
+    if(g) s+='；距上一則訊息約 '+g;
+  }
   if(settings.city){ if(s) s+='；'; const p=(settings.prov||'').replace(/(省|市|壯族自治區|維吾爾自治區|回族自治區|自治區|特別行政區)$/,''); const c=(settings.city||'').replace(/市$/,''); s+='所在地：'+(p&&p!==c?p+'·':'')+c }
   if(settings.injWeather){
     const w=LS.get('rpf.weather',null);
@@ -1380,10 +1398,11 @@ function buildMessages(splitSystem,enLastUser,hist){
   if(!trimmed.length&&p.first) msgs.push({role:'assistant',content:ph(p.first)});
   trimmed.forEach(m=>{
     let c=m.role==='user'?soften(m.content):m.content;
+    if(settings.injTs&&m.ts) c=tsTag(m.ts)+c;
     msgs.push({role:m.role,content:c});
   });
   if(msgs.length&&msgs[msgs.length-1].role!=='user') msgs.push({role:'user',content:'（請以角色身分繼續）'});
-  if(enLastUser){ for(let i=msgs.length-1;i>=0;i--){ if(msgs[i].role==='user'){ msgs[i].content=enLastUser; break } } }
+  if(enLastUser){ for(let i=msgs.length-1;i>=0;i--){ if(msgs[i].role==='user'){ msgs[i].content=(msgs[i].content.match(/^\[\d{2}-\d{2} \d{2}:\d{2}\] /)||[''])[0]+enLastUser; break } } }
   if(splitSystem) return { system:sys, messages:msgs };
   return [{role:'system',content:sys}].concat(msgs);
 }
