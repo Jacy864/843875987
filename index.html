@@ -436,6 +436,11 @@ footer{
         </div>
         <div class="hint" style="margin:-6px 0 10px">模型填 <b>mock</b> 可無 Key 試玩全流程</div>
         <div class="grid2">
+          <div class="field"><label>備用線路 Base URL（空＝停用）</label><input id="sBakBase" placeholder="https://你的Worker.workers.dev/api/coding/paas/v4"></div>
+          <div class="field"><label>備用線路 Key（空＝用主 Key）</label><input id="sBakKey" type="password" placeholder="同主 Key"></div>
+        </div>
+        <div class="hint" style="margin:-6px 0 10px">斷線自動重試 2 次，仍不通且這裡有填就自動切備用線路（跨境網絡不穩時掛 Cloudflare Worker 反代最穩，見 worker.js）</div>
+        <div class="grid2">
           <div class="field"><label>溫度</label><input id="sTemp" type="number" step="0.05" min="0" max="2"></div>
           <div class="field"><label>回覆上限 tokens</label><input id="sMaxTok" type="number" step="128" min="0"><div class="hint">0＝不設限（用模型上限）</div></div>
         </div>
@@ -523,7 +528,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.15';
+const APP_VER='rpf-v5.16';
 const CITY_DATA={
 '北京市':['北京市'],'天津市':['天津市'],'上海市':['上海市'],'重慶市':['重慶市'],
 '廣東省':['廣州市','韶關市','深圳市','珠海市','汕頭市','佛山市','江門市','湛江市','茂名市','肇慶市','惠州市','梅州市','汕尾市','河源市','陽江市','清遠市','東莞市','中山市','潮州市','揭陽市','雲浮市'],
@@ -578,7 +583,7 @@ let settings = LS.get(K_SET, {
   baseUrl:'https://open.bigmodel.cn/api/paas/v4',
   key:'', model:'glm-5.2', temp:0.8, maxTok:0, ctx:20,
   userName:'我', sysPrompt:DEFAULT_SYS, regexRules:'', theme:'auto',
-  visBase:'', visKey:'', visModel:'glm-4v-flash', softWords:'',
+  visBase:'', visKey:'', visModel:'glm-4v-flash', softWords:'', bakBase:'', bakKey:'',
   injTime:1, injTs:1, injWeather:1, city:'', prov:''
 });
 if(!settings.theme) settings.theme='auto';
@@ -938,7 +943,7 @@ function fillDrawer(){
   $('sBaseUrl').value=settings.baseUrl; $('sKey').value=settings.key; $('sModel').value=settings.model;
   $('sTemp').value=settings.temp; $('sMaxTok').value=settings.maxTok; $('sCtx').value=settings.ctx;
   $('sUserName').value=settings.userName; $('sSysPrompt').value=settings.sysPrompt; $('sRegex').value=settings.regexRules;
-  $('sVisModel').value=settings.visModel||''; $('sVisKey').value=settings.visKey||''; $('sVisBase').value=settings.visBase||''; $('sSoftWords').value=settings.softWords||'';
+  $('sVisModel').value=settings.visModel||''; $('sVisKey').value=settings.visKey||''; $('sVisBase').value=settings.visBase||''; $('sSoftWords').value=settings.softWords||''; $('sBakBase').value=settings.bakBase||''; $('sBakKey').value=settings.bakKey||'';
   $('sInjTime').checked=!!settings.injTime; $('sInjTs').checked=!!settings.injTs; $('sInjWeather').checked=!!settings.injWeather; initCitySel(); updWStat();
   updMemSub(); updSetSub();
   updateBaseHint(); renderSeg(); renderSessionList();
@@ -986,6 +991,7 @@ function readSettingsForm(){
     userName:$('sUserName').value.trim()||'我',
     sysPrompt:$('sSysPrompt').value, regexRules:$('sRegex').value,
     visModel:$('sVisModel').value.trim(), visKey:$('sVisKey').value.trim(), visBase:normalizeBase($('sVisBase').value.trim()),
+    bakBase:normalizeBase($('sBakBase').value.trim()), bakKey:$('sBakKey').value.trim(),
     softWords:$('sSoftWords').value,
     injTime:$('sInjTime').checked?1:0, injTs:$('sInjTs').checked?1:0, injWeather:$('sInjWeather').checked?1:0, city:$('sCitySel').value, prov:$('sProv').value,
     theme:settings.theme||'auto', v4:1 });
@@ -1104,7 +1110,7 @@ async function genMemorySummary(){
     body={ model:settings.model, stream:true, temperature:0.3, max_tokens:8000, system:sys, messages:[{role:'user',content:userMsg}] };
   }else{
     body={ model:settings.model, stream:true, temperature:0.3, max_tokens:8000, messages:[{role:'system',content:sys},{role:'user',content:userMsg}] };
-    if(/bigmodel|z\.ai/.test(endpointUrl())) body.thinking={type:'disabled'};
+    if(/bigmodel|z\.ai/.test(endpointUrl()+' '+(settings.bakBase||''))) body.thinking={type:'disabled'};
   }
   memBusy=true;
   const btn=$('memGenBtn'), btnOld=btn.textContent;
@@ -1430,68 +1436,110 @@ function endpointUrl(){
   if(!base){ toast('Base URL 是空的，請到側欄「模型設置」填寫'); throw new Error('Base URL 為空') }
   return (settings.fmt==='anthropic')? base+'/v1/messages' : base+'/chat/completions';
 }
-function reqHeaders(){
+function endpointCandidates(){
+  const list=[]; const main=normalizeBase(settings.baseUrl);
+  if(main) list.push({base:main,key:settings.key});
+  const bak=normalizeBase(settings.bakBase||'');
+  if(bak&&bak!==main) list.push({base:bak,key:settings.bakKey||settings.key});
+  return list;
+}
+function epUrlOf(base){ return (settings.fmt==='anthropic')? base+'/v1/messages' : base+'/chat/completions' }
+function reqHeaders(key){
+  const k=(key==null)?settings.key:key;
   const h={'Content-Type':'application/json'};
   if((settings.fmt||'openai')==='anthropic'){
-    h['x-api-key']=settings.key; h['anthropic-version']='2023-06-01';
-    h['Authorization']='Bearer '+settings.key;
+    h['x-api-key']=k; h['anthropic-version']='2023-06-01';
+    h['Authorization']='Bearer '+k;
   }else{
-    h['Authorization']='Bearer '+settings.key;
+    h['Authorization']='Bearer '+k;
   }
   return h;
 }
-async function apiFetch(body){
-  const res=await fetch(endpointUrl(),{ method:'POST', headers:reqHeaders(),
-    body:JSON.stringify(body), signal:(typeof abortCtrl!=='undefined'&&abortCtrl)?abortCtrl.signal:undefined });
-  if(!res.ok){
-    let msg='HTTP '+res.status;
-    try{ const j=await res.json(); msg=(j.error&&j.error.message)||j.message||msg }catch(e){}
-    throw new Error(msg);
-  }
-  const j=await res.json();
-  if((settings.fmt||'openai')==='anthropic'){
-    const parts=j.content||[]; let t='';
-    parts.forEach(p=>{ if(typeof p==='string') t+=p; else if(p.text) t+=p.text });
-    return { choices:[{ message:{ content:t } }] };
-  }
-  return j;
+const RETRY_DELAYS=[900,1800];
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function isNetErr(e){
+  if(!e||e.name==='AbortError') return false;
+  if(e instanceof TypeError) return true;
+  return /failed to fetch|network|terminated|abrupt|load_failed|net::/i.test(e.message||'');
 }
-async function apiStream(body,onDelta){
-  const res=await fetch(endpointUrl(),{ method:'POST', headers:reqHeaders(),
-    body:JSON.stringify(body), signal:(typeof abortCtrl!=='undefined'&&abortCtrl)?abortCtrl.signal:undefined });
-  if(!res.ok){
-    let msg='HTTP '+res.status;
-    try{ const j=await res.json(); msg=(j.error&&j.error.message)||j.message||msg }catch(e){}
-    throw new Error(msg);
-  }
-  const reader=res.body.getReader(); const dec=new TextDecoder();
-  let buf='',full='';
-  const isAnth=(settings.fmt||'openai')==='anthropic';
-  while(true){
-    const {done,value}=await reader.read(); if(done) break;
-    buf+=dec.decode(value,{stream:true});
-    const lines=buf.split('\n'); buf=lines.pop();
-    for(const ln of lines){
-      const t=ln.trim();
-      if(!t.startsWith('data:')) continue;
-      const d=t.slice(5).trim(); if(d==='[DONE]') continue;
-      try{ const j=JSON.parse(d);
-        let piece='';
-        if(isAnth){
-          if(j.type==='content_block_delta'&&j.delta) piece=j.delta.text||'';
-          if(j.type==='message_delta'&&j.delta&&j.delta.stop_reason) apiStream.lastFinish=j.delta.stop_reason;
-        }else{
-          const ch0=j.choices&&j.choices[0];
-          const delta=ch0&&(ch0.delta||ch0.message);
-          piece=(delta&&delta.content)||'';
-          if(delta&&delta.reasoning_content) apiStream.lastThink=(apiStream.lastThink||0)+delta.reasoning_content.length;
-          if(ch0&&ch0.finish_reason) apiStream.lastFinish=ch0.finish_reason;
+function isBlockErr(e){ return /1301|敏感|sensitive|unsafe/i.test(e.message||'') }
+/* 跨境/擁堵線路抹平：每條線路最多 3 次嘗試（遞延重試），仍不通自動切備用線路；1301 內容攔截直接拋給上層走英文重試 */
+async function lineFetch(body,process){
+  const cands=endpointCandidates();
+  if(!cands.length) throw new Error('Base URL 為空（請到側欄「模型設置」填寫）');
+  let lastErr=null;
+  for(let ci=0;ci<cands.length;ci++){
+    const url=epUrlOf(cands[ci].base);
+    for(let att=0;att<=RETRY_DELAYS.length;att++){
+      try{
+        const res=await fetch(url,{ method:'POST', headers:reqHeaders(cands[ci].key),
+          body:JSON.stringify(body), signal:(typeof abortCtrl!=='undefined'&&abortCtrl)?abortCtrl.signal:undefined });
+        if(!res.ok){
+          let msg='HTTP '+res.status;
+          try{ const j=await res.json(); msg=(j.error&&j.error.message)||j.message||msg }catch(e){}
+          throw new Error(msg);
         }
-        if(piece){ full+=piece; onDelta(full) }
-      }catch(e){}
+        return await process(res);
+      }catch(e){
+        if(e.name==='AbortError'||isBlockErr(e)) throw e;
+        lastErr=e;
+        const transient=isNetErr(e)||/^HTTP 5/.test(e.message||'');
+        if(transient&&att<RETRY_DELAYS.length){
+          toast('線路不穩，自動重試 '+(att+1)+'/'+RETRY_DELAYS.length+(ci?'（備用線路）':'')+'…');
+          await sleep(RETRY_DELAYS[att]); continue;
+        }
+        if(transient&&ci<cands.length-1){ toast('這條線路不通，改走備用線路…'); break }
+        if(ci<cands.length-1) break;
+        throw e;
+      }
     }
   }
-  return full;
+  throw lastErr||new Error('Failed to fetch');
+}
+async function apiFetch(body){
+  const isAnth=(settings.fmt||'openai')==='anthropic';
+  return await lineFetch(body, async res=>{
+    const j=await res.json();
+    if(isAnth){
+      const parts=j.content||[]; let t='';
+      parts.forEach(p=>{ if(typeof p==='string') t+=p; else if(p.text) t+=p.text });
+      return { choices:[{ message:{ content:t } }] };
+    }
+    return j;
+  });
+}
+async function apiStream(body,onDelta){
+  return await lineFetch(body, async res=>{
+    apiStream.lastFinish=null; apiStream.lastThink=0;
+    const reader=res.body.getReader(); const dec=new TextDecoder();
+    let buf='',full='';
+    const isAnth=(settings.fmt||'openai')==='anthropic';
+    while(true){
+      const {done,value}=await reader.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      const lines=buf.split('\n'); buf=lines.pop();
+      for(const ln of lines){
+        const t=ln.trim();
+        if(!t.startsWith('data:')) continue;
+        const d=t.slice(5).trim(); if(d==='[DONE]') continue;
+        try{ const j=JSON.parse(d);
+          let piece='';
+          if(isAnth){
+            if(j.type==='content_block_delta'&&j.delta) piece=j.delta.text||'';
+            if(j.type==='message_delta'&&j.delta&&j.delta.stop_reason) apiStream.lastFinish=j.delta.stop_reason;
+          }else{
+            const ch0=j.choices&&j.choices[0];
+            const delta=ch0&&(ch0.delta||ch0.message);
+            piece=(delta&&delta.content)||'';
+            if(delta&&delta.reasoning_content) apiStream.lastThink=(apiStream.lastThink||0)+delta.reasoning_content.length;
+            if(ch0&&ch0.finish_reason) apiStream.lastFinish=ch0.finish_reason;
+          }
+          if(piece){ full+=piece; onDelta(full) }
+        }catch(e){}
+      }
+    }
+    return full;
+  });
 }
 apiStream.lastFinish=null; apiStream.lastThink=0;
 
@@ -1521,16 +1569,26 @@ function visConf(){
 }
 async function visFetch(body){
   const v=visConf();
-  const res=await fetch(v.base+'/chat/completions',{
-    method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+v.key},
-    body:JSON.stringify(body) });
-  if(!res.ok){
-    let msg='HTTP '+res.status;
-    try{ const j=await res.json(); msg=(j.error&&j.error.message)||j.message||msg }catch(e){}
-    throw new Error(msg);
+  let lastErr=null;
+  for(let att=0;att<2;att++){
+    if(att){ toast('線路不穩，視覺請求重試…'); await sleep(900) }
+    try{
+      const res=await fetch(v.base+'/chat/completions',{
+        method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+v.key},
+        body:JSON.stringify(body) });
+      if(!res.ok){
+        let msg='HTTP '+res.status;
+        try{ const j=await res.json(); msg=(j.error&&j.error.message)||j.message||msg }catch(e){}
+        throw new Error(msg);
+      }
+      const j=await res.json();
+      return (j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content||'').trim();
+    }catch(e){
+      if(e.name==='AbortError'||isBlockErr(e)||!isNetErr(e)) throw e;
+      lastErr=e;
+    }
   }
-  const j=await res.json();
-  return (j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content||'').trim();
+  throw lastErr;
 }
 const CAPTION_PROMPT='你是照片描述助手。用第一人稱視角（我）描述這張我拍的照片，給朋友分享日常的口吻。要求：80~160字；只描述畫面內容（場景、人物、物品、氛圍、光線），不要猜測地點名稱和事件名稱，不要政治相關聯想；直接輸出描述，不要開場白。';
 async function captionImage(dataUrl){
