@@ -92,7 +92,7 @@ footer{
 }
 #inputBox{
   flex:1;background:none;border:none;outline:none;resize:none;color:var(--tx);
-  font:inherit;font-size:15px;line-height:1.5;max-height:132px;padding:6px 0;
+  font:inherit;font-size:16px;line-height:1.5;max-height:132px;padding:6px 0;  /* ≥16px 防 iOS 聚焦自動縮放 */
 }
 #inputBox::placeholder{color:var(--tx3)}
 #imgBtn{
@@ -1794,6 +1794,23 @@ $('inputBox').addEventListener('keydown',e=>{
     e.preventDefault(); onSend();
   }
 });
+
+/* PWA 軟鍵盤避讓：iOS standalone／舊 Android 內核不認 interactive-widget，100dvh 不隨鍵盤縮，
+   輸入條被鍵盤蓋住——用 visualViewport 把 body 壓到可視高度（新 Chrome resizes-content 已生效時 covered≈0，自動不干預） */
+(function(){
+  const vv=window.visualViewport; if(!vv) return;
+  let raf=0;
+  const fit=()=>{
+    raf=0;
+    const covered=window.innerHeight-vv.height-vv.offsetTop;   // 被鍵盤遮住的高度
+    if(covered>60){ document.body.style.height=vv.height+'px'; scrollBottom() }
+    else document.body.style.height='';
+  };
+  const onVR=()=>{ if(!raf) raf=requestAnimationFrame(fit) };
+  vv.addEventListener('resize',onVR);
+  vv.addEventListener('scroll',onVR);
+  fit();
+})();
 
 function extractBlockText(node){
   let out='';

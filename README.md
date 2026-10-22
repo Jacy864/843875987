@@ -88,6 +88,12 @@
 - **Ctrl+Enter 自掐**：寬屏下 Ctrl+Enter 同時命中輸入框與 document 兩個監聽器，第二次觸發變成「停止」，剛發出的請求瞬間被 abort——已合併為單一監聽器
 - **行為矩陣**：寬屏 Enter＝發送、Shift+Enter＝換行、Ctrl/Cmd+Enter＝發送；窄屏 Enter＝換行、Ctrl/Cmd+Enter＝發送（外接鍵盤可用）；輸入法組合期全部不發送
 
+## PWA 軟鍵盤避讓（v5.19）
+
+- **症狀**：瀏覽器開啟正常，PWA（添加到主屏）裡點輸入框彈鍵盤後輸入條被鍵盤蓋住「消失」
+- **病根**：meta 的 `interactive-widget=resizes-content` 只有較新 Android Chrome 認——iOS PWA（standalone）與舊 Android 內核不認，鍵盤彈出時 `100dvh` 不縮，輸入條仍在螢幕物理底部
+- **修法**：監聽 `visualViewport` 的 resize／scroll，被鍵盤遮住高度 >60px 時把 body 壓到可視高度（flex 佈局自動把輸入條頂到鍵盤上方）；新 Chrome 已由 meta 處理時自動不干預。順帶輸入框字號 15→16px，防 iOS 聚焦時強制縮放頁面（iOS 無視 `user-scalable=no`）
+
 
 - 每次發送自動在 system 最前注入 `[環境] 現在時間：2026-10-02（週五）21:35`——模型從此知道今天幾號、聊「今天／昨晚」不會錯亂
 - **訊息時間戳＋間隔感知（v5.15）**：模型無狀態，天生看不見「兩則訊息之間隔了多久」——歷史不帶時間座標時，它的印象凍結在所有消息「同時發生」。現在一併解決：
