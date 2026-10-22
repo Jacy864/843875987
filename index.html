@@ -1788,10 +1788,9 @@ $('inputBox').addEventListener('input',function(){
   this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,132)+'px';
 });
 $('inputBox').addEventListener('keydown',e=>{
-  if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); onSend() }
-});
-document.addEventListener('keydown',e=>{
-  if(e.key==='Enter'&&e.target===$('inputBox')&&!e.shiftKey&&window.innerWidth>700){
+  if(e.key!=='Enter'||e.shiftKey) return;              // Shift+Enter 一律換行
+  if(e.isComposing||e.keyCode===229) return;           // 輸入法組合期（選詞確認）不發送，防中文誤發
+  if(window.innerWidth>700||e.ctrlKey||e.metaKey){     // 寬屏 Enter 或任意寬度 Ctrl/Cmd+Enter 發送
     e.preventDefault(); onSend();
   }
 });
