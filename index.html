@@ -456,7 +456,7 @@ footer{
             <div class="field"><label>模型</label><input id="sVisModel" placeholder="glm-4v-flash"></div>
             <div class="field"><label>API Key（空＝用上面主 Key）</label><input id="sVisKey" type="password" placeholder="同主 Key"></div>
           </div>
-          <label style="margin-top:6px">Base URL（空＝自動：主端點是 Coding 時換 bigmodel 普通端點，否則同主端點）</label>
+          <label style="margin-top:6px">Base URL（空＝自動：主端點含 Coding 路徑時同域換普通端點，否則同主端點）</label>
           <input id="sVisBase" placeholder="自動">
            <div class="hint">Coding 端點只收文字模型，視覺走普通端點；glm-4v-flash 免費/極便宜，與聊天額度分開計</div>
          </div>
@@ -528,7 +528,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.17';
+const APP_VER='rpf-v5.20';
 const CITY_DATA={
 '北京市':['北京市'],'天津市':['天津市'],'上海市':['上海市'],'重慶市':['重慶市'],
 '廣東省':['廣州市','韶關市','深圳市','珠海市','汕頭市','佛山市','江門市','湛江市','茂名市','肇慶市','惠州市','梅州市','汕尾市','河源市','陽江市','清遠市','東莞市','中山市','潮州市','揭陽市','雲浮市'],
@@ -1560,12 +1560,11 @@ function applyPairs(text,pairs){
 function soften(text){
   return applyPairs(text, BUILTIN_SOFT+'\n'+(settings.softWords||''));
 }
-/* ---------- 視覺模型配置（coding 端點不收視覺，自動切普通端點） ---------- */
-const VIS_FALLBACK='https://open.bigmodel.cn/api/paas/v4';
+/* ---------- 視覺模型配置（主端點含 coding 路徑時，同域改寫成普通端點——保留原域名，寄生/反代線路才不會被 CORS/CSP 擋） ---------- */
 function visConf(){
   const mainBase=normalizeBase(settings.baseUrl)||'';
   let base=settings.visBase||'';
-  if(!base) base=/\/coding\//.test(mainBase)?VIS_FALLBACK:mainBase;
+  if(!base) base=/\/coding\//.test(mainBase)?mainBase.replace('/coding/','/'):mainBase;
   return { base, key:settings.visKey||settings.key, model:settings.visModel||'glm-4v-flash' };
 }
 async function visFetch(body){
