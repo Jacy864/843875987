@@ -528,7 +528,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.21';
+const APP_VER='rpf-v5.22';
 const CITY_DATA={
 '北京市':['北京市'],'天津市':['天津市'],'上海市':['上海市'],'重慶市':['重慶市'],
 '廣東省':['廣州市','韶關市','深圳市','珠海市','汕頭市','佛山市','江門市','湛江市','茂名市','肇慶市','惠州市','梅州市','汕尾市','河源市','陽江市','清遠市','東莞市','中山市','潮州市','揭陽市','雲浮市'],
@@ -1335,8 +1335,12 @@ async function refreshWeather(){
         }
         return null;
       };
+      // GeoNames 中文索引帶市/不帶市是不同記錄且規律不定（「杭州市」查不到、「珠海市」查得到），
+      // 兩種形態都試，哪個先命中合格城市用哪個
       let hit=await geoQuery(city);
-      if(!hit||!isCity(hit)) hit=(await geoQuery(city+'市'))||hit;
+      const c2=city.replace(/市$/,'');
+      if((!hit||!isCity(hit))&&c2!==city) hit=(await geoQuery(c2))||hit;
+      if(!hit||!isCity(hit)) hit=(await geoQuery(c2+'市'))||hit;
       if(!hit){ setEnvErr('cityNF'); return null }
       lat=hit.latitude; lon=hit.longitude;
       geo=/^PPL(A|C)/.test(hit.feature_code||'')?hit.name:(hit.name+(hit.admin1?'（'+hit.admin1+'）':''));
