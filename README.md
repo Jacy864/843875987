@@ -94,6 +94,15 @@
 - **病根**：meta 的 `interactive-widget=resizes-content` 只有較新 Android Chrome 認——iOS PWA（standalone）與舊 Android 內核不認，鍵盤彈出時 `100dvh` 不縮，輸入條仍在螢幕物理底部
 - **修法**：監聽 `visualViewport` 的 resize／scroll，被鍵盤遮住高度 >60px 時把 body 壓到可視高度（flex 佈局自動把輸入條頂到鍵盤上方）；新 Chrome 已由 meta 處理時自動不干預。順帶輸入框字號 15→16px，防 iOS 聚焦時強制縮放頁面（iOS 無視 `user-scalable=no`）
 
+## 上游 1113 假死重試＋寄生線三修（v5.21）
+
+- **症狀（2026-11-10 確診）**：寄生線上①圖片描述經常失敗、②自動摘要報「摘要失敗」、③天氣定位完全死掉
+- **病根①（視覺/摘要共用）**：上游 bigmodel 對 coding key **隨機回 429/1113「餘額不足」假死**（普通端點抽中率實測 ~1/3，非真欠費），App 舊重試邏輯只認網絡錯誤，1113 一次抽中直接報失敗。**修法**：`lineFetch`/`visFetch` 把 429/1113/「(餘)額不足」文案納入瞬態重試（主鏈路 4 次嘗試退避 0.9/1.8/3.6s；視覺 3 次嘗試）——線上實測 3 輪 caption 全過、中途 2 次 1113 均被自動救回
+- **病根②（摘要拖慢）**：上游已把 `glm-4.6` 別名映射到 **glm-5.3-flash 思考模型**（`thinking:{type:'disabled'}` 還隨機被忽略），而摘要加 thinking 參數的判斷正則 `/bigmodel|z\.ai/` 在寄生域名下不命中＝從來沒加過。**修法**：正則補 `\/coding\/`，寄生線摘要實測 29s→7s
+- **病根③（天氣定位）**：Arcana 主站全域 `Permissions-Policy: geolocation=()` 頭套到寄生路徑，瀏覽器層禁死定位 API（GitHub Pages 舊家無此頭，搬家後才壞）。**修法（伺服器側）**：Caddyfile 兩個 `@rpapp` handle 塊內補 `header Permissions-Policy "geolocation=self"` 覆蓋（handle 塊覆蓋模式同 CSP，主站不受影響）——線上實測定位→天氣鏈路全通（澳門 17°C 實時拿到）
+- 附帶：`visConf()` 自癒——visBase 存了 bigmodel/z.ai 直連舊地址時自動改寫同域（搬家前舊設置不用手動清）
+- 注意：`glm-4.6` 實際已是 glm-5.3-flash（會思考、回覆前有靜默期），如需非思考模型到側欄換
+
 ## 視覺模型同源修復（v5.20）
 
 - **症狀**：Arcana 寄生線路上主對話正常，但圖片描述與 1301 英文重試全滅（「Failed to fetch」）

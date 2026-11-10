@@ -528,7 +528,7 @@ const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
   set(k,v){ localStorage.setItem(k,JSON.stringify(v)) }
 };
-const APP_VER='rpf-v5.20';
+const APP_VER='rpf-v5.21';
 const CITY_DATA={
 '北京市':['北京市'],'天津市':['天津市'],'上海市':['上海市'],'重慶市':['重慶市'],
 '廣東省':['廣州市','韶關市','深圳市','珠海市','汕頭市','佛山市','江門市','湛江市','茂名市','肇慶市','惠州市','梅州市','汕尾市','河源市','陽江市','清遠市','東莞市','中山市','潮州市','揭陽市','雲浮市'],
@@ -1110,7 +1110,7 @@ async function genMemorySummary(){
     body={ model:settings.model, stream:true, temperature:0.3, max_tokens:8000, system:sys, messages:[{role:'user',content:userMsg}] };
   }else{
     body={ model:settings.model, stream:true, temperature:0.3, max_tokens:8000, messages:[{role:'system',content:sys},{role:'user',content:userMsg}] };
-    if(/bigmodel|z\.ai/.test(endpointUrl()+' '+(settings.bakBase||''))) body.thinking={type:'disabled'};
+    if(/bigmodel|z\.ai|\/coding\//.test(endpointUrl()+' '+(settings.bakBase||''))) body.thinking={type:'disabled'};
   }
   memBusy=true;
   const btn=$('memGenBtn'), btnOld=btn.textContent;
@@ -1456,7 +1456,7 @@ function reqHeaders(key){
   }
   return h;
 }
-const RETRY_DELAYS=[900,1800];
+const RETRY_DELAYS=[900,1800,3600];
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function isNetErr(e){
   if(!e||e.name==='AbortError') return false;
@@ -1464,6 +1464,8 @@ function isNetErr(e){
   return /failed to fetch|network|terminated|abrupt|load_failed|net::/i.test(e.message||'');
 }
 function isBlockErr(e){ return /1301|敏感|sensitive|unsafe/i.test(e.message||'') }
+/* 上游 429/1113「餘額不足」文案＝假死抽籤（歷史已知，非真欠費），按瞬態處理交給重試 */
+function isQuotaFlap(e){ return /^HTTP 429/.test(e&&e.message||'')||/1113|余额不足|餘額不足|rate.?limit|too many requests/i.test(e&&e.message||'') }
 /* 跨境/擁堵線路抹平：每條線路最多 3 次嘗試（遞延重試），仍不通自動切備用線路；1301 內容攔截直接拋給上層走英文重試 */
 async function lineFetch(body,process){
   const cands=endpointCandidates();
@@ -1484,7 +1486,7 @@ async function lineFetch(body,process){
       }catch(e){
         if(e.name==='AbortError'||isBlockErr(e)) throw e;
         lastErr=e;
-        const transient=isNetErr(e)||/^HTTP 5/.test(e.message||'');
+        const transient=isNetErr(e)||isQuotaFlap(e)||/^HTTP 5/.test(e.message||'');
         if(transient&&att<RETRY_DELAYS.length){
           toast('線路不穩，自動重試 '+(att+1)+'/'+RETRY_DELAYS.length+(ci?'（備用線路）':'')+'…');
           await sleep(RETRY_DELAYS[att]); continue;
@@ -1560,18 +1562,19 @@ function applyPairs(text,pairs){
 function soften(text){
   return applyPairs(text, BUILTIN_SOFT+'\n'+(settings.softWords||''));
 }
-/* ---------- 視覺模型配置（主端點含 coding 路徑時，同域改寫成普通端點——保留原域名，寄生/反代線路才不會被 CORS/CSP 擋） ---------- */
+/* ---------- 視覺模型配置（主端點含 coding 路徑時，同域改寫成普通端點——保留原域名，寄生/反代線路才不會被 CORS/CSP 擋）
+   visBase 存了 bigmodel/z.ai 直連舊地址時也自動改寫同域（直連 CORS 已死，搬家後舊設置自癒） ---------- */
 function visConf(){
   const mainBase=normalizeBase(settings.baseUrl)||'';
-  let base=settings.visBase||'';
-  if(!base) base=/\/coding\//.test(mainBase)?mainBase.replace('/coding/','/'):mainBase;
+  let base=normalizeBase(settings.visBase)||'';
+  if(!base||(/bigmodel|z\.ai/.test(base)&&location.origin!==new URL(base).origin)) base=/\/coding\//.test(mainBase)?mainBase.replace('/coding/','/'):mainBase;
   return { base, key:settings.visKey||settings.key, model:settings.visModel||'glm-4v-flash' };
 }
 async function visFetch(body){
   const v=visConf();
   let lastErr=null;
-  for(let att=0;att<2;att++){
-    if(att){ toast('線路不穩，視覺請求重試…'); await sleep(900) }
+  for(let att=0;att<3;att++){
+    if(att){ toast('線路不穩，視覺請求重試 '+(att-1)+'/2…'); await sleep(900) }
     try{
       const res=await fetch(v.base+'/chat/completions',{
         method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+v.key},
@@ -1584,7 +1587,7 @@ async function visFetch(body){
       const j=await res.json();
       return (j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content||'').trim();
     }catch(e){
-      if(e.name==='AbortError'||isBlockErr(e)||!isNetErr(e)) throw e;
+      if(e.name==='AbortError'||isBlockErr(e)||(!isNetErr(e)&&!isQuotaFlap(e))) throw e;
       lastErr=e;
     }
   }
